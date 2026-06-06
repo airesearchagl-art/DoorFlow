@@ -298,6 +298,14 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
         })}
       </div>
 
+      {/* ガラス干渉アラート */}
+      {result.hasGlassInterference && (
+        <div className="bg-red-950/40 border border-red-500/50 rounded-xl px-4 py-3 text-xs text-red-300 flex items-center gap-2">
+          <span className="text-red-400 font-bold flex-shrink-0">🪟 ガラス干渉:</span>
+          <span>ガラリの必要高さがスリットガラスゾーンに侵入しています。スリットガラス下端位置を下方に移動するかガラリ幅を広げてください。</span>
+        </div>
+      )}
+
       {/* 是正措置アラート */}
       {result.remediationHint && (
         <div className="bg-red-950/40 border border-red-500/50 rounded-xl p-4 flex gap-3">

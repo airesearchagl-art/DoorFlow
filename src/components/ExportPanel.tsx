@@ -84,7 +84,29 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
   function handleJsonExport() {
-    const payload = { inputs, result: { ...result, leafLayouts: result.leafLayouts } };
+    const payload = {
+      meta: { tool: 'DoorFlow', generated: new Date().toISOString() },
+      inputs: {
+        ...inputs,
+        leafConfigs: inputs.leafConfigs.map((cfg, i) => ({
+          leafIndex: i,
+          ...cfg,
+        })),
+      },
+      result: {
+        airflowM3s: result.airflowM3s,
+        effectiveAreaM2: result.effectiveAreaM2,
+        physicalAreaM2: result.physicalAreaM2,
+        actualVelocityMs: result.actualVelocityMs,
+        undercutHeightMm: result.undercutHeightMm,
+        isSafe: result.isSafe,
+        hasGlassInterference: result.hasGlassInterference,
+        grilleContribRatio: result.grilleContribRatio,
+        undercutContribRatio: result.undercutContribRatio,
+        leafLayouts: result.leafLayouts,
+        remediationHint: result.remediationHint,
+      },
+    };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     downloadBlob(blob, `doorflow_${Date.now()}.json`);
   }

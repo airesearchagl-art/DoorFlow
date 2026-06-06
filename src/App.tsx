@@ -1,6 +1,13 @@
 import { useState, useMemo, useRef } from 'react';
 import { DoorOpen } from 'lucide-react';
-import { type VentilationInputs, DEFAULTS, calculateVentilation } from './core/ventilationEngine';
+import {
+  type VentilationInputs,
+  type DoorType,
+  DEFAULTS,
+  DEFAULT_LEAF_CONFIG,
+  DOOR_WIDTH_PRESETS,
+  calculateVentilation,
+} from './core/ventilationEngine';
 import { ConfigPanel } from './components/ConfigPanel';
 import { DoorCanvas } from './components/DoorCanvas';
 import { HUDTelemetry } from './components/HUDTelemetry';
@@ -8,24 +15,31 @@ import { ExportPanel } from './components/ExportPanel';
 import './index.css';
 
 const DEFAULT_INPUTS: VentilationInputs = {
-  doorWidthMm: 900,
+  doorWidthMm: DOOR_WIDTH_PRESETS['single'],
   doorHeightMm: 2100,
   doorType: DEFAULTS.doorType,
+  childWidthMm: DEFAULTS.childWidthMm,
   designOffsetMm: DEFAULTS.designOffsetMm,
   requiredAirflowM3h: 120,
   minVelocityMs: DEFAULTS.minVelocityMs,
   maxVelocityMs: DEFAULTS.maxVelocityMs,
   openingType: 'louver',
   openingRate: DEFAULTS.openingRate,
-  selectedLouverWidth: DEFAULTS.selectedLouverWidth,
-  louverHeightFixed: DEFAULTS.louverHeightFixed,
-  louverHeight: DEFAULTS.louverHeight,
-  glassSlitYMm: DEFAULTS.glassSlitYMm,
+  leafConfigs: [{ ...DEFAULT_LEAF_CONFIG }, { ...DEFAULT_LEAF_CONFIG }],
 };
 
 export default function App() {
   const [inputs, setInputs] = useState<VentilationInputs>(DEFAULT_INPUTS);
   const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // When door type changes, auto-update total width preset
+  function handleDoorTypeChange(newType: DoorType) {
+    setInputs(prev => ({
+      ...prev,
+      doorType: newType,
+      doorWidthMm: DOOR_WIDTH_PRESETS[newType],
+    }));
+  }
 
   const result = useMemo(() => calculateVentilation(inputs), [inputs]);
 
@@ -101,12 +115,13 @@ export default function App() {
       )}
 
       {/* Main layout */}
-      <main className="flex-1 max-w-[1440px] w-full mx-auto grid grid-cols-[300px_1fr_340px] gap-0 divide-x divide-slate-800">
+      <main className="flex-1 max-w-[1440px] w-full mx-auto grid grid-cols-[320px_1fr_340px] gap-0 divide-x divide-slate-800">
         {/* Left: Config panel */}
-        <div className="p-5 overflow-y-auto">
+        <div className="overflow-y-auto">
           <ConfigPanel
             inputs={inputs}
             onChange={setInputs}
+            onDoorTypeChange={handleDoorTypeChange}
             grilleContribRatio={result.grilleContribRatio}
             undercutContribRatio={result.undercutContribRatio}
           />
@@ -114,7 +129,7 @@ export default function App() {
 
         {/* Centre: Blueprint canvas */}
         <div className="p-6 flex flex-col items-center justify-start gap-4 bg-slate-950/50 overflow-y-auto">
-          <div className="w-full max-w-[520px]">
+          <div className="w-full max-w-[560px]">
             <div className="mb-4 flex items-center justify-between">
               <span className="text-[11px] uppercase tracking-widest text-slate-500 font-mono">
                 建具立面図（換気開口レイアウト）
@@ -125,7 +140,7 @@ export default function App() {
           </div>
 
           {/* Physics formula footer */}
-          <div className="w-full max-w-[520px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <div className="w-full max-w-[560px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-3">設備換気力学・逆算根拠式</div>
             <div className="grid grid-cols-3 gap-3 text-center">
               {[
@@ -167,7 +182,7 @@ export default function App() {
           </div>
 
           {/* Export panel */}
-          <div className="w-full max-w-[520px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+          <div className="w-full max-w-[560px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <ExportPanel inputs={inputs} result={result} svgRef={svgRef} />
           </div>
         </div>

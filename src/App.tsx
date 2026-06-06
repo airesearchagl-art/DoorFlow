@@ -1,14 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { DoorOpen } from 'lucide-react';
 import { type VentilationInputs, DEFAULTS, calculateVentilation } from './core/ventilationEngine';
 import { ConfigPanel } from './components/ConfigPanel';
 import { DoorCanvas } from './components/DoorCanvas';
 import { HUDTelemetry } from './components/HUDTelemetry';
+import { ExportPanel } from './components/ExportPanel';
 import './index.css';
 
 const DEFAULT_INPUTS: VentilationInputs = {
   doorWidthMm: 900,
   doorHeightMm: 2100,
+  doorType: DEFAULTS.doorType,
   designOffsetMm: DEFAULTS.designOffsetMm,
   requiredAirflowM3h: 120,
   minVelocityMs: DEFAULTS.minVelocityMs,
@@ -16,19 +18,21 @@ const DEFAULT_INPUTS: VentilationInputs = {
   openingType: 'louver',
   openingRate: DEFAULTS.openingRate,
   selectedLouverWidth: DEFAULTS.selectedLouverWidth,
+  louverHeightFixed: DEFAULTS.louverHeightFixed,
+  louverHeight: DEFAULTS.louverHeight,
+  glassSlitYMm: DEFAULTS.glassSlitYMm,
 };
 
 export default function App() {
   const [inputs, setInputs] = useState<VentilationInputs>(DEFAULT_INPUTS);
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   const result = useMemo(() => calculateVentilation(inputs), [inputs]);
 
-  const borderAccent = result.isSafe
-    ? 'border-slate-800'
-    : 'border-red-600/60';
+  const borderAccent = result.isSafe ? 'border-slate-800' : 'border-red-600/60';
 
   return (
-    <div className={`min-h-screen bg-slate-950 flex flex-col`}>
+    <div className="min-h-screen bg-slate-950 flex flex-col">
       {/* Topbar */}
       <header className={`border-b ${borderAccent} bg-slate-900/80 backdrop-blur-sm transition-colors duration-300`}>
         <div className="max-w-[1440px] mx-auto px-6 py-3 flex items-center gap-3">
@@ -44,19 +48,14 @@ export default function App() {
 
           <div className="ml-6 h-5 w-px bg-slate-700" />
 
-          {/* Quick status strip */}
           <div className="flex items-center gap-4 text-xs">
             <span className="text-slate-400">
               風速:{' '}
-              <span
-                className={`font-mono font-bold ${
-                  result.isSafe
-                    ? 'text-emerald-400'
-                    : result.velocityTooHigh
-                    ? 'text-red-400'
-                    : 'text-amber-400'
-                }`}
-              >
+              <span className={`font-mono font-bold ${
+                result.isSafe ? 'text-emerald-400'
+                  : result.velocityTooHigh ? 'text-red-400'
+                  : 'text-amber-400'
+              }`}>
                 {result.actualVelocityMs.toFixed(2)} m/s
               </span>
             </span>
@@ -80,13 +79,11 @@ export default function App() {
           </div>
 
           <div className="ml-auto">
-            <div
-              className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors duration-300 ${
-                result.isSafe
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
-                  : 'border-red-500/50 bg-red-500/10 text-red-400 animate-pulse'
-              }`}
-            >
+            <div className={`text-xs px-3 py-1 rounded-full border font-medium transition-colors duration-300 ${
+              result.isSafe
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                : 'border-red-500/50 bg-red-500/10 text-red-400 animate-pulse'
+            }`}>
               {result.isSafe ? '● 設備要件適合' : '● 要件違反'}
             </div>
           </div>
@@ -107,7 +104,12 @@ export default function App() {
       <main className="flex-1 max-w-[1440px] w-full mx-auto grid grid-cols-[300px_1fr_340px] gap-0 divide-x divide-slate-800">
         {/* Left: Config panel */}
         <div className="p-5 overflow-y-auto">
-          <ConfigPanel inputs={inputs} onChange={setInputs} />
+          <ConfigPanel
+            inputs={inputs}
+            onChange={setInputs}
+            grilleContribRatio={result.grilleContribRatio}
+            undercutContribRatio={result.undercutContribRatio}
+          />
         </div>
 
         {/* Centre: Blueprint canvas */}
@@ -119,7 +121,7 @@ export default function App() {
               </span>
               <span className="text-[10px] text-slate-600 font-mono">縮尺: 1/10 概略</span>
             </div>
-            <DoorCanvas inputs={inputs} result={result} />
+            <DoorCanvas inputs={inputs} result={result} svgRef={svgRef} />
           </div>
 
           {/* Physics formula footer */}
@@ -162,6 +164,11 @@ export default function App() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Export panel */}
+          <div className="w-full max-w-[520px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+            <ExportPanel inputs={inputs} result={result} svgRef={svgRef} />
           </div>
         </div>
 

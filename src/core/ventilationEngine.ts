@@ -2,41 +2,67 @@
 // No React imports. No side effects. All units in SI unless noted.
 
 export type OpeningType = 'louver' | 'punching' | 'undercut';
+export type DoorType = 'single' | 'double' | 'parent-child';
 
 export interface VentilationInputs {
+  // Door geometry
   doorWidthMm: number;
   doorHeightMm: number;
-  designOffsetMm: number;          // default 150
+  doorType: DoorType;           // single / double / parent-child
+  designOffsetMm: number;       // default 150
+
+  // Airflow requirements
   requiredAirflowM3h: number;
-  minVelocityMs: number;           // default 2.0
-  maxVelocityMs: number;           // default 3.0
+  minVelocityMs: number;        // default 2.0
+  maxVelocityMs: number;        // default 3.0
+
+  // Opening
   openingType: OpeningType;
-  openingRate: number;             // default 0.35 (35%)
-  selectedLouverWidth: number;     // fixed grille width (mm); 0 = auto-compute
+  openingRate: number;          // default 0.35
+
+  // Grille sizing controls
+  selectedLouverWidth: number;  // 0 = auto (maxAllowedWidth)
+  louverHeightFixed: boolean;   // if true, use louverHeight as exact H
+  louverHeight: number;         // mm — used when louverHeightFixed = true
+
+  // Design constraint: glass slit bottom Y (mm from door top)
+  // When >0, grille top must be placed below this value
+  glassSlitYMm: number;         // 0 = no constraint
+}
+
+export interface LeafLayout {
+  leafWidthMm: number;       // effective width of one leaf for grille placement
+  leafOffsetMm: number;      // X offset of this leaf from door origin
+  grilleWidthMm: number;
+  grilleHeightMm: number;
+  grilleEffectiveAreaM2: number;
 }
 
 export interface VentilationResult {
   // Airflow
-  airflowM3s: number;              // Q in m³/s
-  effectiveAreaM2: number;         // required effective opening area (A_req_eff)
-  physicalAreaM2: number;          // required gross physical area
+  airflowM3s: number;
+  effectiveAreaM2: number;       // A_req_eff
+  physicalAreaM2: number;
 
-  // Grille geometry (mm) — louver or punching
-  grilleWidthMm: number;
+  // Per-leaf layout (1 entry for single, 2 for double/parent-child)
+  leafLayouts: LeafLayout[];
+
+  // Aggregate grille totals (sum of all leaves)
+  grilleWidthMm: number;         // widest single leaf grille W (for compat)
   grilleHeightMm: number;
-  grilleEffectiveAreaM2: number;   // actual eff. area contributed by grille alone
+  grilleEffectiveAreaM2: number;
 
-  // Undercut geometry (mm) — compensation gap at door bottom
-  undercutHeightMm: number;        // 0 if grille alone is sufficient
-  undercutWidthMm: number;         // = door width (full span)
+  // Undercut
+  undercutHeightMm: number;
+  undercutWidthMm: number;
 
-  // Derived totals (for pure-undercut mode, grille fields are 0)
-  requiredOpeningWidthMm: number;  // primary opening width (grille W, or undercut W)
-  requiredOpeningHeightMm: number; // primary opening height (grille H, or undercut gap)
-  maxAllowedWidthMm: number;       // door width minus 2 × offset
-  maxAllowedHeightMm: number;      // door height minus 2 × offset
+  // Legacycompat fields
+  requiredOpeningWidthMm: number;
+  requiredOpeningHeightMm: number;
+  maxAllowedWidthMm: number;
+  maxAllowedHeightMm: number;
 
-  // Velocity (computed over combined opening)
+  // Combined velocity
   actualVelocityMs: number;
 
   // Compliance
@@ -45,10 +71,13 @@ export interface VentilationResult {
   velocityTooHigh: boolean;
   overflowsWidth: boolean;
   overflowsHeight: boolean;
-  undercutOverflowsStructural: boolean; // undercut > 25 mm structural limit
+  undercutOverflowsStructural: boolean;
   hasGeometryViolation: boolean;
 
-  // Actionable remediation hint
+  // Contribution ratios (0–1)
+  grilleContribRatio: number;    // grille share of total effective area
+  undercutContribRatio: number;  // undercut share
+
   remediationHint: string | null;
 }
 
@@ -57,24 +86,42 @@ export const DEFAULTS = {
   minVelocityMs: 2.0,
   maxVelocityMs: 3.0,
   openingRate: 0.35,
-  selectedLouverWidth: 0,          // 0 = auto (use maxAllowedWidth)
+  selectedLouverWidth: 0,
+  louverHeightFixed: false,
+  louverHeight: 400,
+  glassSlitYMm: 0,
+  doorType: 'single' as DoorType,
 } as const;
 
 const UNDERCUT_STRUCTURAL_LIMIT_MM = 25;
 
-/**
- * Core reverse-calculation engine with combined grille + undercut compensation.
- *
- * For louver/punching:
- *   1. Resolve grille width (user-fixed or auto = maxAllowedWidth).
- *   2. Derive grille height so that A_grille_phys × α ≥ A_req_eff.
- *   3. If grille height overflows maxAllowedHeight, cap it and allocate the
- *      remaining effective-area shortage to an undercut at the door bottom.
- *   4. Undercut height = A_shortage / doorWidthM × 1000 (mm).
- *
- * For pure undercut:
- *   Width = maxAllowedWidth, height solved directly.
- */
+// ---------------------------------------------------------------------------
+// Leaf dimension resolver
+// For double: two equal leaves; for parent-child: 60% main + 40% child
+// ---------------------------------------------------------------------------
+function resolveLeaves(inputs: VentilationInputs): Array<{ widthMm: number; offsetXMm: number }> {
+  const { doorWidthMm, doorType } = inputs;
+  if (doorType === 'double') {
+    const half = doorWidthMm / 2;
+    return [
+      { widthMm: half, offsetXMm: 0 },
+      { widthMm: half, offsetXMm: half },
+    ];
+  }
+  if (doorType === 'parent-child') {
+    const main = doorWidthMm * 0.6;
+    const child = doorWidthMm * 0.4;
+    return [
+      { widthMm: main, offsetXMm: 0 },
+      { widthMm: child, offsetXMm: main },
+    ];
+  }
+  return [{ widthMm: doorWidthMm, offsetXMm: 0 }];
+}
+
+// ---------------------------------------------------------------------------
+// Core engine
+// ---------------------------------------------------------------------------
 export function calculateVentilation(inputs: VentilationInputs): VentilationResult {
   const {
     doorWidthMm,
@@ -86,134 +133,171 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
     openingType,
     openingRate,
     selectedLouverWidth,
+    louverHeightFixed,
+    louverHeight,
+    glassSlitYMm,
   } = inputs;
 
-  // --- 1. Volume flow: m³/h → m³/s ---
+  // 1. Volume flow
   const airflowM3s = requiredAirflowM3h / 3600;
-
-  // --- 2. Required effective area at target (mid-point) velocity ---
   const targetVelocityMs = (minVelocityMs + maxVelocityMs) / 2;
-  const effectiveAreaM2 = airflowM3s / targetVelocityMs;   // A_req_eff
-  const physicalAreaM2 = effectiveAreaM2 / openingRate;     // A_req_phys
+  const effectiveAreaM2 = airflowM3s / targetVelocityMs;
+  const physicalAreaM2 = effectiveAreaM2 / openingRate;
 
-  // --- 3. Boundary zone ---
+  // 2. Boundary zone (full door)
   const maxAllowedWidthMm = Math.max(1, doorWidthMm - 2 * designOffsetMm);
   const maxAllowedHeightMm = Math.max(1, doorHeightMm - 2 * designOffsetMm);
 
-  // -----------------------------------------------------------------------
-  // PURE UNDERCUT mode
-  // -----------------------------------------------------------------------
+  // 3. Glass slit height constraint: grille zone top is pushed down by glassSlitYMm
+  // Available grille height is reduced when glass slit occupies upper zone
+  const glassConstraintMm = glassSlitYMm > 0
+    ? Math.max(0, glassSlitYMm - designOffsetMm)
+    : 0;
+  const effectiveGrilleZoneHeightMm = Math.max(10, maxAllowedHeightMm - glassConstraintMm);
+
+  // -------------------------------------------------------------------------
+  // PURE UNDERCUT
+  // -------------------------------------------------------------------------
   if (openingType === 'undercut') {
     const ucWidthMm = maxAllowedWidthMm;
     const ucWidthM = ucWidthMm / 1000;
     const ucHeightMm = (physicalAreaM2 / ucWidthM) * 1000;
-
     const actualEffM2 = (ucWidthMm / 1000) * (ucHeightMm / 1000) * openingRate;
     const actualVelocityMs = airflowM3s / Math.max(actualEffM2, 1e-9);
 
     const velocityTooLow = actualVelocityMs < minVelocityMs;
     const velocityTooHigh = actualVelocityMs > maxVelocityMs;
-    const overflowsWidth = false;
     const undercutOverflowsStructural = ucHeightMm > UNDERCUT_STRUCTURAL_LIMIT_MM;
-    const overflowsHeight = undercutOverflowsStructural;
-    const hasGeometryViolation = overflowsWidth || overflowsHeight;
+    const hasGeometryViolation = undercutOverflowsStructural;
     const isSafe = !velocityTooLow && !velocityTooHigh && !hasGeometryViolation;
 
-    const remediationHint = buildRemediationHint({
-      velocityTooLow, velocityTooHigh, overflowsWidth, overflowsHeight,
-      undercutOverflowsStructural, grilleOverflowsHeight: false,
-      openingType, grilleHeightMm: 0, maxAllowedHeightMm,
-      undercutHeightMm: ucHeightMm, doorWidthMm,
-      actualVelocityMs, maxVelocityMs, minVelocityMs,
-      combinedMode: false,
-    });
+    const singleLeaf: LeafLayout = {
+      leafWidthMm: doorWidthMm,
+      leafOffsetMm: 0,
+      grilleWidthMm: 0,
+      grilleHeightMm: 0,
+      grilleEffectiveAreaM2: 0,
+    };
 
     return {
       airflowM3s, effectiveAreaM2, physicalAreaM2,
+      leafLayouts: [singleLeaf],
       grilleWidthMm: 0, grilleHeightMm: 0, grilleEffectiveAreaM2: 0,
       undercutHeightMm: ucHeightMm, undercutWidthMm: ucWidthMm,
-      requiredOpeningWidthMm: ucWidthMm,
-      requiredOpeningHeightMm: ucHeightMm,
+      requiredOpeningWidthMm: ucWidthMm, requiredOpeningHeightMm: ucHeightMm,
       maxAllowedWidthMm, maxAllowedHeightMm,
       actualVelocityMs, isSafe, velocityTooLow, velocityTooHigh,
-      overflowsWidth, overflowsHeight, undercutOverflowsStructural,
-      hasGeometryViolation, remediationHint,
+      overflowsWidth: false, overflowsHeight: undercutOverflowsStructural,
+      undercutOverflowsStructural, hasGeometryViolation,
+      grilleContribRatio: 0, undercutContribRatio: 1,
+      remediationHint: buildRemediationHint({
+        velocityTooLow, velocityTooHigh, overflowsWidth: false,
+        overflowsHeight: undercutOverflowsStructural,
+        undercutOverflowsStructural, grilleOverflowsHeight: false,
+        openingType, grilleHeightMm: 0, maxAllowedHeightMm,
+        undercutHeightMm: ucHeightMm, doorWidthMm,
+        actualVelocityMs, maxVelocityMs, minVelocityMs, combinedMode: false,
+      }),
     };
   }
 
-  // -----------------------------------------------------------------------
-  // LOUVER / PUNCHING mode with optional fixed-width + undercut compensation
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // LOUVER / PUNCHING — distribute across leaves
+  // -------------------------------------------------------------------------
+  const leaves = resolveLeaves(inputs);
+  const numLeaves = leaves.length;
 
-  // 3a. Resolve grille width
-  const rawGrilleWidth = selectedLouverWidth > 0
-    ? Math.min(selectedLouverWidth, maxAllowedWidthMm)
-    : maxAllowedWidthMm;
-  const grilleWidthMm = Math.max(10, rawGrilleWidth);
-  const grilleWidthM = grilleWidthMm / 1000;
+  // Each leaf carries equal share of required physical area
+  const physAreaPerLeaf = physicalAreaM2 / numLeaves;
 
-  // 3b. Grille height needed to satisfy the full physical area requirement
-  const neededGrilleHeightMm = (physicalAreaM2 / grilleWidthM) * 1000;
+  const leafLayouts: LeafLayout[] = leaves.map(leaf => {
+    const leafMaxW = Math.max(1, leaf.widthMm - 2 * designOffsetMm);
 
-  // 3c. Cap grille height at the allowed zone
-  const grilleHeightMm = Math.min(neededGrilleHeightMm, maxAllowedHeightMm);
-  const grillePhysAreaM2 = grilleWidthM * (grilleHeightMm / 1000);
-  const grilleEffectiveAreaM2 = grillePhysAreaM2 * openingRate;
+    // Resolve grille width for this leaf
+    const rawW = selectedLouverWidth > 0
+      ? Math.min(selectedLouverWidth, leafMaxW)
+      : leafMaxW;
+    const gW = Math.max(10, rawW);
+    const gWm = gW / 1000;
 
-  // 3d. Undercut compensation for any remaining shortage
-  const aShortageM2 = Math.max(0, effectiveAreaM2 - grilleEffectiveAreaM2);
+    // Resolve grille height
+    let gH: number;
+    if (louverHeightFixed && louverHeight > 0) {
+      gH = Math.min(louverHeight, effectiveGrilleZoneHeightMm);
+    } else {
+      const neededH = (physAreaPerLeaf / gWm) * 1000;
+      gH = Math.min(neededH, effectiveGrilleZoneHeightMm);
+    }
+
+    const gEffM2 = (gW / 1000) * (gH / 1000) * openingRate;
+
+    return {
+      leafWidthMm: leaf.widthMm,
+      leafOffsetMm: leaf.offsetXMm,
+      grilleWidthMm: gW,
+      grilleHeightMm: gH,
+      grilleEffectiveAreaM2: gEffM2,
+    };
+  });
+
+  // Aggregate
+  const totalGrilleEffM2 = leafLayouts.reduce((s, l) => s + l.grilleEffectiveAreaM2, 0);
+
+  // Representative values (from largest leaf = first)
+  const primaryLeaf = leafLayouts[0];
+
+  // Undercut compensation
+  const aShortageM2 = Math.max(0, effectiveAreaM2 - totalGrilleEffM2);
   const doorWidthM = doorWidthMm / 1000;
-  // Undercut effective area = undercutH * doorW * openingRate (openingRate = 1 for gap)
-  // We treat the undercut as a fully open gap (α = 1):
-  const undercutHeightMm = aShortageM2 > 0
-    ? (aShortageM2 / doorWidthM) * 1000   // gap α = 1 (full opening)
-    : 0;
+  const undercutHeightMm = aShortageM2 > 0 ? (aShortageM2 / doorWidthM) * 1000 : 0;
   const undercutWidthMm = doorWidthMm;
 
-  // 3e. Total combined effective area
-  const totalEffectiveAreaM2 = grilleEffectiveAreaM2
-    + (undercutHeightMm / 1000) * doorWidthM;  // undercut is full-open
+  // Combined effective area & velocity
+  const totalEffM2 = totalGrilleEffM2 + (undercutHeightMm / 1000) * doorWidthM;
+  const actualVelocityMs = airflowM3s / Math.max(totalEffM2, 1e-9);
 
-  // 3f. Combined velocity
-  const actualVelocityMs = airflowM3s / Math.max(totalEffectiveAreaM2, 1e-9);
-
-  // 3g. Compliance flags
+  // Compliance
   const velocityTooLow = actualVelocityMs < minVelocityMs;
   const velocityTooHigh = actualVelocityMs > maxVelocityMs;
-  const overflowsWidth = grilleWidthMm > maxAllowedWidthMm + 0.01;
-  const grilleOverflowsHeight = neededGrilleHeightMm > maxAllowedHeightMm + 0.01;
+  const overflowsWidth = primaryLeaf.grilleWidthMm > (Math.max(1, primaryLeaf.leafWidthMm - 2 * designOffsetMm)) + 0.01;
+  const neededHforPrimary = louverHeightFixed ? louverHeight : (physAreaPerLeaf / (primaryLeaf.grilleWidthMm / 1000)) * 1000;
+  const grilleOverflowsHeight = neededHforPrimary > effectiveGrilleZoneHeightMm + 0.01;
   const undercutOverflowsStructural = undercutHeightMm > UNDERCUT_STRUCTURAL_LIMIT_MM;
   const overflowsHeight = grilleOverflowsHeight && undercutOverflowsStructural;
   const hasGeometryViolation = overflowsWidth || (grilleOverflowsHeight && undercutOverflowsStructural);
   const isSafe = !velocityTooLow && !velocityTooHigh && !hasGeometryViolation;
 
-  const remediationHint = buildRemediationHint({
-    velocityTooLow, velocityTooHigh, overflowsWidth,
-    overflowsHeight: grilleOverflowsHeight,
-    undercutOverflowsStructural, grilleOverflowsHeight,
-    openingType, grilleHeightMm: neededGrilleHeightMm, maxAllowedHeightMm,
-    undercutHeightMm, doorWidthMm,
-    actualVelocityMs, maxVelocityMs, minVelocityMs,
-    combinedMode: undercutHeightMm > 0,
-  });
+  const grilleContribRatio = totalEffM2 > 0 ? totalGrilleEffM2 / totalEffM2 : 0;
+  const undercutContribRatio = 1 - grilleContribRatio;
 
   return {
     airflowM3s, effectiveAreaM2, physicalAreaM2,
-    grilleWidthMm, grilleHeightMm, grilleEffectiveAreaM2,
+    leafLayouts,
+    grilleWidthMm: primaryLeaf.grilleWidthMm,
+    grilleHeightMm: primaryLeaf.grilleHeightMm,
+    grilleEffectiveAreaM2: totalGrilleEffM2,
     undercutHeightMm, undercutWidthMm,
-    requiredOpeningWidthMm: grilleWidthMm,
-    requiredOpeningHeightMm: grilleHeightMm,
+    requiredOpeningWidthMm: primaryLeaf.grilleWidthMm,
+    requiredOpeningHeightMm: primaryLeaf.grilleHeightMm,
     maxAllowedWidthMm, maxAllowedHeightMm,
     actualVelocityMs, isSafe, velocityTooLow, velocityTooHigh,
-    overflowsWidth, overflowsHeight, undercutOverflowsStructural,
-    hasGeometryViolation, remediationHint,
+    overflowsWidth, overflowsHeight, undercutOverflowsStructural, hasGeometryViolation,
+    grilleContribRatio, undercutContribRatio,
+    remediationHint: buildRemediationHint({
+      velocityTooLow, velocityTooHigh, overflowsWidth,
+      overflowsHeight: grilleOverflowsHeight,
+      undercutOverflowsStructural, grilleOverflowsHeight,
+      openingType, grilleHeightMm: neededHforPrimary, maxAllowedHeightMm: effectiveGrilleZoneHeightMm,
+      undercutHeightMm, doorWidthMm,
+      actualVelocityMs, maxVelocityMs, minVelocityMs,
+      combinedMode: undercutHeightMm > 0,
+    }),
   };
 }
 
 // ---------------------------------------------------------------------------
 // Remediation hint builder
 // ---------------------------------------------------------------------------
-
 interface HintInputs {
   velocityTooLow: boolean;
   velocityTooHigh: boolean;
@@ -245,14 +329,14 @@ function buildRemediationHint(h: HintInputs): string | null {
 
   if (h.grilleOverflowsHeight && !h.undercutOverflowsStructural && h.combinedMode) {
     hints.push(
-      `【複合補償モード】ガラリ高さが意匠境界（${h.maxAllowedHeightMm.toFixed(0)} mm）を超えるため、` +
-      `不足面積をアンダーカット ${h.undercutHeightMm.toFixed(1)} mm で自動補償しています。` +
-      `建具H寸法の拡大、またはガラリ固定幅の縮小でアンダーカットを削減できます。`
+      `【複合補償モード】ガラリ高さが意匠ゾーン（${h.maxAllowedHeightMm.toFixed(0)} mm）を超えるため、` +
+      `不足面積をアンダーカット ${h.undercutHeightMm.toFixed(1)} mm で自動補償中。` +
+      `建具H寸法の拡大、またはスリットガラス位置の下方移動でゾーンを拡張できます。`
     );
   } else if (h.grilleOverflowsHeight && !h.combinedMode) {
     const excess = Math.ceil(h.grilleHeightMm - h.maxAllowedHeightMm);
     hints.push(
-      `【意匠境界エラー】ガラリ高さが意匠境界を ${excess} mm 超過しています。` +
+      `【意匠境界エラー】ガラリ高さが意匠ゾーンを ${excess} mm 超過しています。` +
       `建具H寸法を ≥${excess} mm 拡大するか、固定幅を広げて高さを削減してください。`
     );
   }
@@ -268,7 +352,7 @@ function buildRemediationHint(h: HintInputs): string | null {
     hints.push(
       `【構造限界超過】アンダーカット補償量（${h.undercutHeightMm.toFixed(1)} mm）が` +
       `構造上限（${UNDERCUT_STRUCTURAL_LIMIT_MM} mm）を超えています。` +
-      `ガラリ固定幅を広げる・建具W/Hを拡大する・必要風量を見直してください。`
+      `ガラリ固定幅を広げる・建具W/Hを拡大する・両開き扉への変更を検討してください。`
     );
   }
 
@@ -276,7 +360,7 @@ function buildRemediationHint(h: HintInputs): string | null {
     const excess = (h.actualVelocityMs - h.maxVelocityMs).toFixed(2);
     hints.push(
       `【警告】通過風速が速すぎます（${h.actualVelocityMs.toFixed(2)} m/s、上限超過 +${excess} m/s）。` +
-      `気流騒音や扉のバタつきの原因となります。ガラリ幅を広げるか、アンダーカット高さを併用して開口面積を確保してください。`
+      `気流騒音・扉バタつきの原因となります。ガラリ幅を広げるか、アンダーカット高さを併用してください。`
     );
   }
 

@@ -100,10 +100,18 @@ function SliderInput({
 }
 
 const OPENING_TYPES: { value: OpeningType; label: string; desc: string }[] = [
-  { value: 'louver', label: 'Louver', desc: 'Angled slat grille' },
-  { value: 'punching', label: 'Punching', desc: 'Perforated panel' },
-  { value: 'undercut', label: 'Undercut', desc: 'Bottom door gap' },
+  { value: 'louver',   label: 'ガラリ',             desc: '有効開口率35%基準の羽板式換気口' },
+  { value: 'punching', label: 'パンチングメタル',   desc: '打ち抜き孔加工パネル' },
+  { value: 'undercut', label: 'ドア下アンダーカット', desc: 'ドア下端と床面のすき間による通気' },
 ];
+
+const OPENING_TYPE_LABELS: Record<OpeningType, string> = {
+  louver:   'ガラリ',
+  punching: 'パンチングメタル',
+  undercut: 'アンダーカット',
+};
+
+export { OPENING_TYPE_LABELS };
 
 export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
   function set<K extends keyof VentilationInputs>(key: K, value: VentilationInputs[K]) {
@@ -116,14 +124,14 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         <div className="w-7 h-7 rounded-lg bg-sky-500/20 flex items-center justify-center">
           <Settings2 size={15} className="text-sky-400" />
         </div>
-        <h2 className="text-sm font-semibold text-slate-200">Parameters</h2>
+        <h2 className="text-sm font-semibold text-slate-200">設計パラメータ設定</h2>
       </div>
 
-      {/* Door Dimensions */}
-      <SectionHeader icon={Ruler} label="Door Dimensions" />
+      {/* 建具寸法境界 */}
+      <SectionHeader icon={Ruler} label="建具寸法境界" />
       <div className="flex flex-col gap-3">
         <NumberInput
-          label="Width"
+          label="ドア製品幅 (W)"
           value={inputs.doorWidthMm}
           unit="mm"
           min={500}
@@ -132,7 +140,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
           onChange={v => set('doorWidthMm', v)}
         />
         <NumberInput
-          label="Height"
+          label="ドア製品高さ (H)"
           value={inputs.doorHeightMm}
           unit="mm"
           min={1800}
@@ -141,7 +149,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
           onChange={v => set('doorHeightMm', v)}
         />
         <SliderInput
-          label="Design Offset"
+          label="意匠境界オフセット（標準150mm）"
           value={inputs.designOffsetMm}
           unit="mm"
           min={50}
@@ -151,11 +159,11 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         />
       </div>
 
-      {/* Airflow */}
-      <SectionHeader icon={Wind} label="Airflow Target" />
+      {/* 設備要求換気量 */}
+      <SectionHeader icon={Wind} label="設備要求換気量" />
       <div className="flex flex-col gap-3">
         <SliderInput
-          label="Required Airflow"
+          label="必要風量 (Q)"
           value={inputs.requiredAirflowM3h}
           unit="m³/h"
           min={10}
@@ -164,7 +172,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
           onChange={v => set('requiredAirflowM3h', v)}
         />
         <SliderInput
-          label="Min Velocity"
+          label="許容最小風速"
           value={inputs.minVelocityMs}
           unit="m/s"
           min={0.5}
@@ -173,7 +181,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
           onChange={v => set('minVelocityMs', v)}
         />
         <SliderInput
-          label="Max Velocity"
+          label="許容最大風速"
           value={inputs.maxVelocityMs}
           unit="m/s"
           min={2.0}
@@ -183,8 +191,8 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         />
       </div>
 
-      {/* Opening Type */}
-      <SectionHeader icon={LayoutGrid} label="Opening Type" />
+      {/* 開口部方式選択 */}
+      <SectionHeader icon={LayoutGrid} label="開口部方式選択" />
       <div className="flex flex-col gap-2">
         {OPENING_TYPES.map(opt => (
           <button
@@ -209,10 +217,10 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         ))}
       </div>
 
-      {/* Opening Rate */}
-      <SectionHeader icon={Sliders} label="Opening Rate" />
+      {/* 開口率設定 */}
+      <SectionHeader icon={Sliders} label="開口率設定 (有効開口率 α)" />
       <SliderInput
-        label={`Effective open area ratio`}
+        label="有効開口面積比率"
         value={inputs.openingRate}
         unit=""
         min={0.1}
@@ -221,10 +229,10 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         onChange={v => set('openingRate', v)}
       />
       <div className="mt-1 text-[11px] text-slate-500">
-        Default: {(DEFAULTS.openingRate * 100).toFixed(0)}% (louver/grille industry standard)
+        標準値: {(DEFAULTS.openingRate * 100).toFixed(0)}%（ガラリ・グリル業界標準値）
       </div>
 
-      {/* Reset */}
+      {/* リセット */}
       <button
         onClick={() =>
           onChange({
@@ -240,7 +248,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         }
         className="mt-6 text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors text-center"
       >
-        Reset to defaults
+        デフォルト値にリセット
       </button>
     </aside>
   );

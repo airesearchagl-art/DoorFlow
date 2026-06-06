@@ -170,36 +170,37 @@ function buildRemediationHint(h: HintInputs): string | null {
 
   if (h.overflowsHeight && h.openingType === 'undercut') {
     hints.push(
-      `Undercut gap (${h.requiredOpeningHeightMm.toFixed(1)} mm) exceeds structural limit. ` +
-        `Switch to louver or increase door width.`
+      `【意匠境界エラー】アンダーカット隙間（${h.requiredOpeningHeightMm.toFixed(1)} mm）が構造上の上限を超過しています。` +
+        `ガラリ方式への切り替え、またはドア製品幅の拡大を検討してください。`
     );
   } else if (h.overflowsHeight) {
     const excess = Math.ceil(h.requiredOpeningHeightMm - h.maxAllowedHeightMm);
     hints.push(
-      `Grille height overflows boundary by ${excess} mm. ` +
-        `Increase door height by ≥${excess} mm or widen the door to reduce required height.`
+      `【意匠境界エラー】必要開口が150mmの意匠オフセット境界線を${excess}mm突破しています。` +
+        `意匠プロポーションを維持するため、必要風量を下げるか、アンダーカット方式への切り替え、または建具H寸法を≥${excess}mm拡大してください。`
     );
   }
 
   if (h.overflowsWidth) {
     hints.push(
-      `Grille width exceeds available zone. Increase door width or reduce airflow target.`
+      `【意匠境界エラー】必要開口が150mmの意匠オフセット境界線を突破しています。` +
+        `意匠プロポーションを維持するため、必要風量を下げるか、アンダーカット方式への切り替え、または建具W寸法自体の拡大を検討してください。`
     );
   }
 
   if (h.velocityTooHigh) {
     const excessMs = (h.actualVelocityMs - h.maxVelocityMs).toFixed(2);
     hints.push(
-      `Velocity ${h.actualVelocityMs.toFixed(2)} m/s exceeds max ${h.maxVelocityMs} m/s (+${excessMs} m/s). ` +
-        `Increase opening area or switch to louver type.`
+      `【警告】通過風速が速すぎます（${h.actualVelocityMs.toFixed(2)} m/s、上限超過 +${excessMs} m/s）。` +
+        `気流騒音や扉のバタつきの原因となります。ドア製品幅を広げるか、アンダーカット高さを併用して開口面積を確保してください。`
     );
   }
 
   if (h.velocityTooLow) {
     const deficitMs = (h.minVelocityMs - h.actualVelocityMs).toFixed(2);
     hints.push(
-      `Velocity ${h.actualVelocityMs.toFixed(2)} m/s below min ${h.minVelocityMs} m/s (−${deficitMs} m/s). ` +
-        `Reduce opening area or increase airflow.`
+      `【警告】通過風速が遅すぎます（${h.actualVelocityMs.toFixed(2)} m/s、下限不足 −${deficitMs} m/s）。` +
+        `換気不足となります。開口面積を縮小するか、必要風量を増加させてください。`
     );
   }
 

@@ -1,73 +1,188 @@
-# React + TypeScript + Vite
+# DoorFlow — 建具換気シミュレーションツール
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+建築家・設備設計者・工事施工者向けの、**建具の意匠プロポーションと換気力学的適合性をリアルタイムで統合検証**するインタラクティブ設計支援ツールです。
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## ツールの目的
 
-## React Compiler
+ドア（建具）に設けるガラリ・パンチングメタル・アンダーカットなどの換気開口部について、**設備要求風量を満たしつつ、意匠上の150mm境界オフセットルールを遵守できるか**を即時に逆算・可視化します。
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+設計フェーズで以下の問いに即答します：
 
-## Expanding the ESLint configuration
+- 必要換気量 **Q m³/h** を確保するために、何×何 mm のガラリが必要か？
+- その開口寸法は意匠境界（150mmオフセット）の内側に収まるか？
+- 通過風速は適正範囲（2.0〜3.0 m/s）に入っているか？
+- 不適合の場合、どのような是正措置（寸法変更・方式切り替え）が有効か？
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+---
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## 技術スタック
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+| 分類 | 採用技術 |
+|------|---------|
+| フレームワーク | React 18 + Vite 5 |
+| 言語 | TypeScript（strict モード） |
+| スタイリング | TailwindCSS v3 |
+| 図面描画 | SVG（インライン、レスポンシブ） |
+| アイコン | lucide-react |
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+---
+
+## アーキテクチャ概要
+
+```
+src/
+├── core/
+│   └── ventilationEngine.ts   # 純粋 TS 換気力学エンジン（React 依存なし）
+├── components/
+│   ├── ConfigPanel.tsx        # 左ペイン：設計パラメータ入力
+│   ├── DoorCanvas.tsx         # 中央：SVG 建具立面図ビューポート
+│   └── HUDTelemetry.tsx       # 右ペイン：リアルタイム HUD 指標
+└── App.tsx                    # 3カラムレイアウト統合
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+**設計原則**：`src/core/` と UI 層を厳密に分離します。`ventilationEngine.ts` は純粋な TypeScript 関数のみで構成され、React・DOM・副作用は一切含みません。これにより単体テスト・再利用が容易です。
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+---
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## 換気力学の計算根拠式
+
+### Step 1 — 体積風量の単位換算
+
+$$Q \, [\text{m}^3/\text{s}] = \frac{Q_h \, [\text{m}^3/\text{h}]}{3600}$$
+
+設備図書に記載された時間風量を秒風量へ変換します。
+
+### Step 2 — 必要有効開口面積の逆算
+
+$$A_{\text{eff}} \, [\text{m}^2] = \frac{Q}{V_{\text{target}}}$$
+
+$V_{\text{target}}$ は許容最小・最大風速の中央値（標準 2.5 m/s）を採用します。
+
+### Step 3 — 必要製品（グロス）面積の算出
+
+$$A_{\text{phys}} = \frac{A_{\text{eff}}}{\alpha}$$
+
+$\alpha$ は開口率（有効開口面積比率）。ガラリ標準値は **0.35（35%）**。
+
+### Step 4 — 開口形状の逆算
+
+| 方式 | 逆算ロジック |
+|------|-------------|
+| ガラリ／パンチング | $A_{\text{phys}}$ から正方形に近い矩形を算出。幅が意匠ゾーン最大幅を超える場合は幅を最大値に固定し、高さを補正。 |
+| アンダーカット | ドア全幅（オフセット除く）を固定幅として、$A_{\text{phys}} \div W$ で隙間高さを逆算。構造上限 25 mm を監視。 |
+
+### Step 5 — 実通過風速の検証
+
+$$V_{\text{actual}} = \frac{Q}{A_{\text{phys}} \times \alpha}$$
+
+$V_{\text{actual}}$ が $[V_{\min},\, V_{\max}]$ の範囲内かつ意匠境界を侵食しない場合に **適合（isSafe = true）** と判定します。
+
+---
+
+## 建築物理ルール
+
+| ルール | 値 |
+|--------|-----|
+| 許容最小通過風速 | 2.0 m/s |
+| 許容最大通過風速 | 3.0 m/s |
+| ガラリ／グリル標準開口率 | 35%（0.35） |
+| 意匠境界オフセット（初期値） | 150 mm |
+| アンダーカット構造上限 | 25 mm |
+
+---
+
+## ローカル開発手順
+
+### 前提条件
+
+- Node.js 18 以上
+- npm 9 以上
+
+### セットアップ
+
+```bash
+# 依存パッケージのインストール
+npm install
+
+# 開発サーバー起動（http://localhost:5173）
+npm run dev
+
+# 本番ビルド
+npm run build
+
+# ビルド成果物のプレビュー
+npm run preview
+
+# ESLint チェック
+npm run lint
 ```
+
+---
+
+## Vercel デプロイ手順
+
+本リポジトリは Vercel による自動デプロイに対応しています。
+
+### 初回セットアップ
+
+1. [Vercel ダッシュボード](https://vercel.com/dashboard) にログイン
+2. **Add New Project** → GitHub リポジトリ `DoorFlow` を選択
+3. ビルド設定は自動検出されます（Vite）：
+   - **Framework Preset**: Vite
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+4. **Deploy** をクリック
+
+### 継続的デプロイ
+
+`main` ブランチへのプッシュごとに Vercel が自動でビルド・デプロイします。プレビューデプロイはプルリクエストごとに自動生成されます。
+
+---
+
+## 使用方法ガイド
+
+### 1. 設計パラメータ入力（左ペイン）
+
+| 項目 | 説明 |
+|------|------|
+| ドア製品幅 (W) | 建具製品の内法幅（500〜1500 mm） |
+| ドア製品高さ (H) | 建具製品の内法高さ（1800〜3000 mm） |
+| 意匠境界オフセット | 建具枠内周からの意匠的禁止ゾーン幅（標準 150 mm） |
+| 必要風量 (Q) | 設備設計から要求される換気量（m³/h） |
+| 許容最小風速 | 換気効果が担保される下限風速（標準 2.0 m/s） |
+| 許容最大風速 | 気流騒音・扉バタつきが生じる上限（標準 3.0 m/s） |
+| 開口部方式 | ガラリ／パンチングメタル／アンダーカット から選択 |
+| 有効開口率 α | 製品開口面積に対する実効通気面積の比率 |
+
+### 2. SVG 建具立面図（中央ペイン）
+
+- **金色破線**: 意匠境界ゾーン（150mmオフセット）
+- **青色パターン**: 算出された換気開口部（ガラリ羽板 / パンチング孔 / アンダーカット隙間）
+- **赤色破線枠**: 要件違反時に建具全体をハイライト
+- **明かり窓トグル**: 意匠用スリットガラスの表示・高さ調整
+
+### 3. リアルタイム HUD（右ペイン）
+
+- **開口部通過風速メーター**: 緑帯が適正ゾーン、針がリアルタイムで移動
+- **メトリクスカード**: 計算風速・通過風量・有効面積・推奨開口寸法
+- **意匠境界クリアランスバー**: 横幅・縦幅それぞれの余裕率を可視化
+- **赤枠アラート**: 不適合時に具体的な是正措置テキストを表示
+
+---
+
+## アラート・是正措置（自動生成）
+
+| 条件 | 表示メッセージ例 |
+|------|----------------|
+| 通過風速が上限超過 | 【警告】通過風速が速すぎます。気流騒音や扉のバタつきの原因となります。ドア製品幅を広げるか、アンダーカット高さを併用して開口面積を確保してください。 |
+| 開口が意匠境界を突破 | 【意匠境界エラー】必要開口が150mmの意匠オフセット境界線を突破しています。必要風量を下げるか、アンダーカット方式への切り替え、または建具W寸法の拡大を検討してください。 |
+| アンダーカットが構造上限超過 | 【意匠境界エラー】アンダーカット隙間が構造上限を超過しています。ガラリ方式への切り替え、またはドア製品幅の拡大を検討してください。 |
+| 通過風速が下限未満 | 【警告】通過風速が遅すぎます。換気不足となります。開口面積を縮小するか、必要風量を増加させてください。 |
+
+---
+
+## ライセンス
+
+MIT License — 建築・設備設計実務での自由な活用を歓迎します。

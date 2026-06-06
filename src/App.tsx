@@ -37,7 +37,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-base font-bold text-slate-100 leading-none">DoorFlow</h1>
-              <p className="text-[10px] text-slate-500 leading-tight">Ventilation Simulation Tool</p>
+              <p className="text-[10px] text-slate-500 leading-tight">建具換気シミュレーションツール</p>
             </div>
           </div>
 
@@ -46,7 +46,7 @@ export default function App() {
           {/* Quick status strip */}
           <div className="flex items-center gap-4 text-xs">
             <span className="text-slate-400">
-              Velocity:{' '}
+              風速:{' '}
               <span
                 className={`font-mono font-bold ${
                   result.isSafe
@@ -60,7 +60,7 @@ export default function App() {
               </span>
             </span>
             <span className="text-slate-400">
-              Area:{' '}
+              有効面積:{' '}
               <span className="font-mono font-bold text-sky-400">
                 {(result.effectiveAreaM2 * 1e4).toFixed(1)} cm²
               </span>
@@ -81,7 +81,7 @@ export default function App() {
                   : 'border-red-500/50 bg-red-500/10 text-red-400 animate-pulse'
               }`}
             >
-              {result.isSafe ? '● COMPLIANT' : '● VIOLATION'}
+              {result.isSafe ? '● 設備要件適合' : '● 要件違反'}
             </div>
           </div>
         </div>
@@ -91,7 +91,7 @@ export default function App() {
       {!result.isSafe && result.remediationHint && (
         <div className="bg-red-950/60 border-b border-red-600/40 px-6 py-2">
           <div className="max-w-[1440px] mx-auto text-xs text-red-300 flex items-center gap-2">
-            <span className="font-bold text-red-400 flex-shrink-0">⚠ ALERT:</span>
+            <span className="font-bold text-red-400 flex-shrink-0">⚠ 警告:</span>
             <span>{result.remediationHint}</span>
           </div>
         </div>
@@ -109,21 +109,21 @@ export default function App() {
           <div className="w-full max-w-[520px]">
             <div className="mb-4 flex items-center justify-between">
               <span className="text-[11px] uppercase tracking-widest text-slate-500 font-mono">
-                Door Elevation Blueprint
+                建具立面図（換気開口レイアウト）
               </span>
-              <span className="text-[10px] text-slate-600 font-mono">Scale: 1:10 approx.</span>
+              <span className="text-[10px] text-slate-600 font-mono">縮尺: 1/10 概略</span>
             </div>
             <DoorCanvas inputs={inputs} result={result} />
           </div>
 
           {/* Physics formula footer */}
           <div className="w-full max-w-[520px] bg-slate-900/60 border border-slate-800 rounded-xl p-4">
-            <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-3">Engineering Formula</div>
+            <div className="text-[11px] uppercase tracking-widest text-slate-500 mb-3">設備換気力学・逆算根拠式</div>
             <div className="grid grid-cols-3 gap-3 text-center">
               {[
-                { label: 'Q = V_flow / 3600', sub: 'Volume (m³/s)', value: `${result.airflowM3s.toFixed(4)} m³/s` },
-                { label: 'A_eff = Q / V', sub: 'Effective area', value: `${result.effectiveAreaM2.toFixed(4)} m²` },
-                { label: 'A_phys = A_eff / η', sub: 'Physical area', value: `${result.physicalAreaM2.toFixed(4)} m²` },
+                { label: 'Q = V_flow / 3600', sub: '通過秒風量 Q (m³/s)', value: `${result.airflowM3s.toFixed(4)} m³/s` },
+                { label: 'A_eff = Q / V',     sub: '必要有効面積 A_eff (㎡)', value: `${result.effectiveAreaM2.toFixed(4)} m²` },
+                { label: 'A_phys = A_eff / η', sub: '必要製品面積 A_phys (㎡)', value: `${result.physicalAreaM2.toFixed(4)} m²` },
               ].map(f => (
                 <div key={f.label} className="flex flex-col gap-1">
                   <span className="text-[10px] font-mono text-slate-500 italic">{f.label}</span>

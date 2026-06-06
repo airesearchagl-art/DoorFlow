@@ -40,7 +40,7 @@ function MetricCard({
     <div className={`rounded-xl border p-4 flex flex-col gap-2 ${statusColors[colorKey]}`}>
       <div className="flex items-center gap-2">
         <Icon size={13} className="text-slate-400" />
-        <span className="text-[11px] uppercase tracking-widest text-slate-400">{label}</span>
+        <span className="text-[10px] uppercase tracking-widest text-slate-400 leading-tight">{label}</span>
       </div>
       <div className="flex items-baseline gap-1.5">
         <span className={`text-2xl font-bold font-mono ${valueColors[colorKey]}`}>{value}</span>
@@ -60,7 +60,6 @@ function VelocityMeter({
   min: number;
   max: number;
 }) {
-  // Display range: 0 to max*1.5
   const displayMax = max * 1.5;
   const pct = Math.min(velocity / displayMax, 1) * 100;
   const safeLow = (min / displayMax) * 100;
@@ -73,16 +72,18 @@ function VelocityMeter({
     <div className="flex flex-col gap-2">
       <div className="flex justify-between text-[11px] text-slate-400">
         <span>0 m/s</span>
-        <span className="text-emerald-400 font-mono">{min}–{max} m/s safe zone</span>
+        <span className="text-emerald-400 font-mono">
+          {min}–{max} m/s 定石適正風速レンジ
+        </span>
         <span>{displayMax.toFixed(1)} m/s</span>
       </div>
       <div className="relative h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-        {/* safe zone band */}
+        {/* 適正風速帯 */}
         <div
           className="absolute h-full bg-emerald-500/20 border-x border-emerald-500/40"
           style={{ left: `${safeLow}%`, width: `${safeHigh - safeLow}%` }}
         />
-        {/* fill bar */}
+        {/* 充填バー */}
         <div
           className="absolute h-full rounded-full transition-all duration-300"
           style={{
@@ -91,7 +92,7 @@ function VelocityMeter({
             opacity: 0.85,
           }}
         />
-        {/* needle tick */}
+        {/* 針 */}
         <div
           className="absolute top-0 w-0.5 h-full rounded-full transition-all duration-300"
           style={{ left: `${pct}%`, background: needleColor, boxShadow: `0 0 6px ${needleColor}` }}
@@ -101,12 +102,18 @@ function VelocityMeter({
         <span
           className={`text-xs font-mono font-bold ${isSafe ? 'text-emerald-400' : 'text-red-400'}`}
         >
-          {velocity.toFixed(3)} m/s {isSafe ? '✓ IN RANGE' : '✗ OUT OF RANGE'}
+          {velocity.toFixed(3)} m/s {isSafe ? '✓ 適正風速内' : '✗ 適正風速範囲外'}
         </span>
       </div>
     </div>
   );
 }
+
+const OPENING_TYPE_JA: Record<string, string> = {
+  louver:   'ガラリ',
+  punching: 'パンチングメタル',
+  undercut: 'アンダーカット',
+};
 
 export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
   const velocityStatus = result.velocityTooHigh
@@ -117,11 +124,11 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header */}
+      {/* ヘッダー */}
       <div className="flex items-center gap-2">
         <Activity size={15} className="text-sky-400" />
-        <h2 className="text-sm font-semibold text-slate-200 uppercase tracking-widest">
-          Live Telemetry
+        <h2 className="text-sm font-semibold text-slate-200 tracking-wide">
+          リアルタイム性能検証HUD
         </h2>
         <div
           className={`ml-auto flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full border ${
@@ -135,15 +142,15 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
           ) : (
             <AlertTriangle size={11} />
           )}
-          {result.isSafe ? 'COMPLIANT' : 'NON-COMPLIANT'}
+          {result.isSafe ? '適合' : '不適合'}
         </div>
       </div>
 
-      {/* Velocity Meter */}
+      {/* 風速メーター */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
         <div className="text-[11px] uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-1.5">
           <Zap size={11} />
-          Air Velocity Gauge
+          開口部通過風速メーター
         </div>
         <VelocityMeter
           velocity={result.actualVelocityMs}
@@ -152,52 +159,52 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
         />
       </div>
 
-      {/* Metric cards grid */}
+      {/* メトリクスカード */}
       <div className="grid grid-cols-2 gap-3">
         <MetricCard
           icon={Zap}
-          label="Flow Velocity"
+          label="計算風速"
           value={result.actualVelocityMs.toFixed(2)}
           unit="m/s"
-          sub={`Target: ${inputs.minVelocityMs}–${inputs.maxVelocityMs} m/s`}
+          sub={`許容範囲: ${inputs.minVelocityMs}–${inputs.maxVelocityMs} m/s`}
           status={velocityStatus}
         />
         <MetricCard
           icon={Activity}
-          label="Volume Flow"
+          label="通過風量換算"
           value={(result.airflowM3s * 1000).toFixed(2)}
           unit="L/s"
           sub={`= ${inputs.requiredAirflowM3h} m³/h`}
         />
         <MetricCard
           icon={Maximize2}
-          label="Effective Area"
+          label="必要有効開口面積"
           value={(result.effectiveAreaM2 * 1e4).toFixed(1)}
           unit="cm²"
-          sub={`Physical: ${(result.physicalAreaM2 * 1e4).toFixed(1)} cm²`}
+          sub={`製品面積: ${(result.physicalAreaM2 * 1e4).toFixed(1)} cm²`}
         />
         <MetricCard
           icon={Maximize2}
-          label="Opening Size"
+          label="推奨製品開口寸法"
           value={`${result.requiredOpeningWidthMm.toFixed(0)}×${result.requiredOpeningHeightMm.toFixed(0)}`}
           unit="mm"
-          sub={`Max zone: ${result.maxAllowedWidthMm.toFixed(0)}×${result.maxAllowedHeightMm.toFixed(0)} mm`}
+          sub={`最大許容: ${result.maxAllowedWidthMm.toFixed(0)}×${result.maxAllowedHeightMm.toFixed(0)} mm`}
           status={result.hasGeometryViolation ? 'error' : 'ok'}
         />
       </div>
 
-      {/* Geometry compliance bars */}
+      {/* 意匠境界制約クリアランス */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
-        <div className="text-[11px] uppercase tracking-widest text-slate-400">Geometry Compliance</div>
+        <div className="text-[11px] uppercase tracking-widest text-slate-400">意匠境界制約クリアランス</div>
         {[
           {
-            label: 'Width utilisation',
+            label: '横幅方向利用率',
             used: result.requiredOpeningWidthMm,
             max: result.maxAllowedWidthMm,
             overflow: result.overflowsWidth,
           },
           {
-            label: inputs.openingType === 'undercut' ? 'Undercut gap' : 'Height utilisation',
+            label: inputs.openingType === 'undercut' ? 'アンダーカット隙間高さ' : '縦幅方向利用率',
             used: result.requiredOpeningHeightMm,
             max: inputs.openingType === 'undercut' ? 25 : result.maxAllowedHeightMm,
             overflow: result.overflowsHeight,
@@ -225,13 +232,13 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
         })}
       </div>
 
-      {/* Remediation alert */}
+      {/* 是正措置アラート */}
       {result.remediationHint && (
         <div className="bg-red-950/40 border border-red-500/50 rounded-xl p-4 flex gap-3">
           <AlertTriangle size={16} className="text-red-400 flex-shrink-0 mt-0.5" />
           <div className="flex flex-col gap-1.5">
-            <div className="text-xs font-semibold text-red-400 uppercase tracking-wider">
-              Architectural Remediation Required
+            <div className="text-xs font-semibold text-red-400 tracking-wider">
+              建築的是正措置が必要です
             </div>
             {result.remediationHint.split(' · ').map((hint, i) => (
               <div key={i} className="flex items-start gap-1.5 text-xs text-red-300/90">
@@ -243,15 +250,15 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
         </div>
       )}
 
-      {/* Quick stats footer */}
+      {/* フッター統計 */}
       <div className="grid grid-cols-3 gap-2">
         {[
-          { label: 'Opening Rate', value: `${(inputs.openingRate * 100).toFixed(0)}%` },
-          { label: 'Type', value: inputs.openingType.charAt(0).toUpperCase() + inputs.openingType.slice(1) },
-          { label: 'Design Offset', value: `${inputs.designOffsetMm}mm` },
+          { label: '開口率 α', value: `${(inputs.openingRate * 100).toFixed(0)}%` },
+          { label: '開口方式', value: OPENING_TYPE_JA[inputs.openingType] ?? inputs.openingType },
+          { label: '意匠オフセット', value: `${inputs.designOffsetMm}mm` },
         ].map(stat => (
           <div key={stat.label} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-center">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wider">{stat.label}</div>
+            <div className="text-[10px] text-slate-500 tracking-wide">{stat.label}</div>
             <div className="text-sm font-mono text-slate-300 mt-0.5">{stat.value}</div>
           </div>
         ))}

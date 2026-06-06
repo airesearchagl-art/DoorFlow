@@ -139,7 +139,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
     <div className="flex flex-col items-center gap-3">
       {/* Glass slit toggle */}
       <div className="flex items-center gap-3 text-sm text-slate-400">
-        <span>Glass Slit Panel</span>
+        <span>明かり窓（意匠用スリットガラス）</span>
         <button
           onClick={() => setShowGlassSlit(v => !v)}
           className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
@@ -154,7 +154,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
         </button>
         {showGlassSlit && (
           <div className="flex items-center gap-1.5">
-            <span className="text-xs text-slate-500">Height:</span>
+            <span className="text-xs text-slate-500">高さ:</span>
             <input
               type="range"
               min={60}
@@ -265,7 +265,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
               fontSize={9}
               opacity={0.7}
             >
-              GLAZED SLIT
+              明かり窓（スリットガラス）
             </text>
           </g>
         )}
@@ -290,7 +290,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
           fontSize={9}
           opacity={0.8}
         >
-          {inputs.designOffsetMm}mm design margin
+          {inputs.designOffsetMm}mm 意匠境界オフセット
         </text>
 
         {/* Opening (grille / louver / undercut) */}
@@ -329,7 +329,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
               fill={openingColor}
               fontSize={9}
             >
-              UNDERCUT {result.requiredOpeningHeightMm.toFixed(1)}mm
+              アンダーカット {result.requiredOpeningHeightMm.toFixed(1)}mm
             </text>
           </g>
         )}
@@ -429,7 +429,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
 
         {/* Blueprint title */}
         <text x={PAD} y={20} fill="#4a6fa5" fontSize={11} fontFamily="monospace" opacity={0.9}>
-          DOOR ELEVATION — VENTILATION LAYOUT
+          建具立面図 — 換気開口レイアウト
         </text>
         <text x={CANVAS_W - PAD} y={20} textAnchor="end" fill="#4a6fa5" fontSize={9} fontFamily="monospace" opacity={0.6}>
           DoorFlow v1.0
@@ -444,7 +444,7 @@ export function DoorCanvas({ inputs, result }: DoorCanvasProps) {
             : 'border-red-500/40 bg-red-500/10 text-red-400'
         }`}
       >
-        {result.isSafe ? '✓ VENTILATION COMPLIANT' : '✗ NON-COMPLIANT — SEE REMEDIATION'}
+        {result.isSafe ? '✓ 設備・意匠要件に適合' : '✗ 要件不適合 — 是正措置を確認してください'}
       </div>
     </div>
   );

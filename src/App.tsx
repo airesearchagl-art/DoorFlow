@@ -15,6 +15,7 @@ const DEFAULT_INPUTS: VentilationInputs = {
   maxVelocityMs: DEFAULTS.maxVelocityMs,
   openingType: 'louver',
   openingRate: DEFAULTS.openingRate,
+  selectedLouverWidth: DEFAULTS.selectedLouverWidth,
 };
 
 export default function App() {
@@ -71,6 +72,11 @@ export default function App() {
                 {inputs.requiredAirflowM3h} m³/h
               </span>
             </span>
+            {result.undercutHeightMm > 0 && (inputs.openingType === 'louver' || inputs.openingType === 'punching') && (
+              <span className="text-amber-400 font-mono font-bold">
+                ＋UC {result.undercutHeightMm.toFixed(1)}mm
+              </span>
+            )}
           </div>
 
           <div className="ml-auto">
@@ -132,6 +138,30 @@ export default function App() {
                 </div>
               ))}
             </div>
+            {result.undercutHeightMm > 0 && (inputs.openingType === 'louver' || inputs.openingType === 'punching') && (
+              <div className="mt-3 border-t border-slate-800 pt-3 grid grid-cols-2 gap-3 text-center">
+                {[
+                  {
+                    label: 'A_shortage = A_eff − A_grille',
+                    sub: 'アンダーカット必要面積 (㎡)',
+                    value: `${((result.effectiveAreaM2 - result.grilleEffectiveAreaM2) * 1e4).toFixed(1)} cm²`,
+                    color: 'text-amber-400',
+                  },
+                  {
+                    label: 'UC_h = A_shortage / W_door',
+                    sub: 'アンダーカット高さ (mm)',
+                    value: `${result.undercutHeightMm.toFixed(1)} mm`,
+                    color: result.undercutOverflowsStructural ? 'text-red-400' : 'text-amber-400',
+                  },
+                ].map(f => (
+                  <div key={f.label} className="flex flex-col gap-1">
+                    <span className="text-[10px] font-mono text-slate-500 italic">{f.label}</span>
+                    <span className="text-[10px] text-slate-600">{f.sub}</span>
+                    <span className={`text-sm font-mono font-bold ${f.color}`}>{f.value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

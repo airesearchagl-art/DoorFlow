@@ -4,6 +4,7 @@ import {
   Sliders,
   Settings2,
   LayoutGrid,
+  MoveHorizontal,
 } from 'lucide-react';
 import { type VentilationInputs, type OpeningType, DEFAULTS } from '../core/ventilationEngine';
 
@@ -65,6 +66,7 @@ function SliderInput({
   max,
   step,
   onChange,
+  highlight,
 }: {
   label: string;
   value: number;
@@ -73,12 +75,13 @@ function SliderInput({
   max: number;
   step: number;
   onChange: (v: number) => void;
+  highlight?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
       <div className="flex justify-between">
-        <span className="text-xs text-slate-400">{label}</span>
-        <span className="text-xs font-mono text-sky-400">
+        <span className={`text-xs ${highlight ? 'text-amber-300' : 'text-slate-400'}`}>{label}</span>
+        <span className={`text-xs font-mono ${highlight ? 'text-amber-400' : 'text-sky-400'}`}>
           {value.toFixed(step < 1 ? 2 : 0)} {unit}
         </span>
       </div>
@@ -89,7 +92,7 @@ function SliderInput({
         step={step}
         value={value}
         onChange={e => onChange(Number(e.target.value))}
-        className="w-full accent-sky-500 h-1.5"
+        className={`w-full h-1.5 ${highlight ? 'accent-amber-400' : 'accent-sky-500'}`}
       />
       <div className="flex justify-between text-[10px] text-slate-600">
         <span>{min} {unit}</span>
@@ -100,23 +103,24 @@ function SliderInput({
 }
 
 const OPENING_TYPES: { value: OpeningType; label: string; desc: string }[] = [
-  { value: 'louver',   label: 'ガラリ',             desc: '有効開口率35%基準の羽板式換気口' },
-  { value: 'punching', label: 'パンチングメタル',   desc: '打ち抜き孔加工パネル' },
+  { value: 'louver',   label: 'ガラリ',              desc: '有効開口率35%基準の羽板式換気口' },
+  { value: 'punching', label: 'パンチングメタル',    desc: '打ち抜き孔加工パネル' },
   { value: 'undercut', label: 'ドア下アンダーカット', desc: 'ドア下端と床面のすき間による通気' },
 ];
 
-const OPENING_TYPE_LABELS: Record<OpeningType, string> = {
+export const OPENING_TYPE_LABELS: Record<OpeningType, string> = {
   louver:   'ガラリ',
   punching: 'パンチングメタル',
   undercut: 'アンダーカット',
 };
 
-export { OPENING_TYPE_LABELS };
-
 export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
   function set<K extends keyof VentilationInputs>(key: K, value: VentilationInputs[K]) {
     onChange({ ...inputs, [key]: value });
   }
+
+  const isGrille = inputs.openingType === 'louver' || inputs.openingType === 'punching';
+  const maxGrilleWidth = Math.max(100, inputs.doorWidthMm - 2 * inputs.designOffsetMm);
 
   return (
     <aside className="flex flex-col gap-0 bg-slate-900 border border-slate-800 rounded-xl p-5 h-full overflow-y-auto">
@@ -217,6 +221,38 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
         ))}
       </div>
 
+      {/* 固定開口幅 — ガラリ/パンチングのみ表示 */}
+      {isGrille && (
+        <>
+          <SectionHeader icon={MoveHorizontal} label="固定開口幅 (W) 設定" />
+          <div className="flex flex-col gap-2">
+            <SliderInput
+              label="ガラリ固定幅（0 = 自動最大幅）"
+              value={inputs.selectedLouverWidth}
+              unit="mm"
+              min={0}
+              max={maxGrilleWidth}
+              step={10}
+              onChange={v => set('selectedLouverWidth', v)}
+              highlight
+            />
+            <div className="text-[11px] text-slate-500 leading-snug">
+              固定幅を設定すると、不足換気面積を<span className="text-amber-400 font-semibold">アンダーカット</span>
+              で自動補償します（複合換気レイアウト）。
+              <br />0 = 意匠境界内の最大幅を自動採用。
+            </div>
+            {inputs.selectedLouverWidth > 0 && (
+              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                <span className="text-amber-400 text-[11px]">⚡</span>
+                <span className="text-[11px] text-amber-300">
+                  固定幅モード: {inputs.selectedLouverWidth} mm — 不足分は下部アンダーカットで補償
+                </span>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {/* 開口率設定 */}
       <SectionHeader icon={Sliders} label="開口率設定 (有効開口率 α)" />
       <SliderInput
@@ -244,6 +280,7 @@ export function ConfigPanel({ inputs, onChange }: ConfigPanelProps) {
             maxVelocityMs: DEFAULTS.maxVelocityMs,
             openingType: 'louver',
             openingRate: DEFAULTS.openingRate,
+            selectedLouverWidth: DEFAULTS.selectedLouverWidth,
           })
         }
         className="mt-6 text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors text-center"

@@ -116,6 +116,29 @@ export const DOOR_WIDTH_PRESETS: Record<DoorType, number> = {
   double: 1800,
 };
 
+// ---------------------------------------------------------------------------
+// Simulation mode
+// ---------------------------------------------------------------------------
+export type SimMode = 'calculate' | 'validate';
+
+export interface ValidationLeafConfig {
+  grilleWidthMm: number;
+  grilleHeightMm: number;
+}
+
+export interface ValidationConfig {
+  leafConfigs: [ValidationLeafConfig, ValidationLeafConfig];
+  undercutHeightMm: number;
+}
+
+export const DEFAULT_VALIDATION_CONFIG: ValidationConfig = {
+  leafConfigs: [
+    { grilleWidthMm: 600, grilleHeightMm: 400 },
+    { grilleWidthMm: 300, grilleHeightMm: 400 },
+  ],
+  undercutHeightMm: 0,
+};
+
 const UNDERCUT_STRUCTURAL_LIMIT_MM = 25;
 
 // ---------------------------------------------------------------------------
@@ -359,6 +382,94 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
       undercutHeightMm, doorWidthMm,
       actualVelocityMs, maxVelocityMs, minVelocityMs,
       combinedMode: undercutHeightMm > 0,
+    }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Validation mode engine — user specifies dimensions, compute resulting velocity
+// ---------------------------------------------------------------------------
+export function validateVentilation(
+  inputs: VentilationInputs,
+  validConfig: ValidationConfig,
+): VentilationResult {
+  const {
+    doorWidthMm, doorHeightMm, designOffsetMm,
+    requiredAirflowM3h, minVelocityMs, maxVelocityMs,
+    openingType, openingRate,
+  } = inputs;
+
+  const airflowM3s = requiredAirflowM3h / 3600;
+  const maxAllowedWidthMm = Math.max(1, doorWidthMm - 2 * designOffsetMm);
+  const maxAllowedHeightMm = Math.max(1, doorHeightMm - 2 * designOffsetMm);
+  const leaves = resolveLeaves(inputs);
+
+  const leafLayouts: LeafLayout[] = leaves.map((leaf, i) => {
+    const vc = validConfig.leafConfigs[Math.min(i, 1) as 0 | 1];
+    const cfg = inputs.leafConfigs[Math.min(i, 1) as 0 | 1];
+    const gW = Math.max(0, vc.grilleWidthMm);
+    const gH = Math.max(0, vc.grilleHeightMm);
+    const gEffM2 = (gW / 1000) * (gH / 1000) * openingRate;
+    const grilleXOffsetMm = computeGrilleXOffset(cfg.grilleAlign, leaf.widthMm, gW, designOffsetMm);
+
+    const effGlass = cfg.glassSlitLinked
+      ? doorHeightMm - designOffsetMm - gH
+      : cfg.glassSlitYMm;
+    const glassSlitHeightMm = effGlass > designOffsetMm ? effGlass - designOffsetMm : 0;
+    const glassSlitWidthMm = cfg.glassSlitLinked ? gW : leaf.widthMm * 0.55;
+    const glassSlitXOffsetMm = cfg.glassSlitLinked ? grilleXOffsetMm : (leaf.widthMm - glassSlitWidthMm) / 2;
+
+    return {
+      leafWidthMm: leaf.widthMm, leafOffsetMm: leaf.offsetXMm,
+      grilleWidthMm: gW, grilleHeightMm: gH, grilleEffectiveAreaM2: gEffM2, grilleXOffsetMm,
+      glassSlitYMm: effGlass, glassSlitHeightMm, glassSlitWidthMm, glassSlitXOffsetMm,
+      glassSlitLinked: cfg.glassSlitLinked, glassInterference: false,
+    };
+  });
+
+  const totalGrilleEffM2 = leafLayouts.reduce((s, l) => s + l.grilleEffectiveAreaM2, 0);
+
+  // Undercut (pure gap — no α factor)
+  const ucH = Math.max(0, validConfig.undercutHeightMm);
+  const ucEffM2 = openingType !== 'undercut'
+    ? (doorWidthMm / 1000) * (ucH / 1000) * openingRate
+    : (doorWidthMm / 1000) * (ucH / 1000);
+
+  const totalEffM2 = totalGrilleEffM2 + ucEffM2;
+  const actualVelocityMs = totalEffM2 > 1e-9 ? airflowM3s / totalEffM2 : Infinity;
+
+  const velocityTooLow = actualVelocityMs < minVelocityMs;
+  const velocityTooHigh = actualVelocityMs > maxVelocityMs;
+  const undercutOverflowsStructural = ucH > UNDERCUT_STRUCTURAL_LIMIT_MM;
+  const hasGeometryViolation = undercutOverflowsStructural;
+  const isSafe = !velocityTooLow && !velocityTooHigh && !hasGeometryViolation;
+  const grilleContribRatio = totalEffM2 > 0 ? totalGrilleEffM2 / totalEffM2 : 0;
+  const primaryLeaf = leafLayouts[0];
+
+  return {
+    airflowM3s,
+    effectiveAreaM2: totalEffM2,
+    physicalAreaM2: totalEffM2 / Math.max(openingRate, 0.01),
+    leafLayouts,
+    grilleWidthMm: primaryLeaf.grilleWidthMm,
+    grilleHeightMm: primaryLeaf.grilleHeightMm,
+    grilleEffectiveAreaM2: totalGrilleEffM2,
+    undercutHeightMm: ucH, undercutWidthMm: doorWidthMm,
+    requiredOpeningWidthMm: primaryLeaf.grilleWidthMm,
+    requiredOpeningHeightMm: primaryLeaf.grilleHeightMm,
+    maxAllowedWidthMm, maxAllowedHeightMm,
+    actualVelocityMs, isSafe, velocityTooLow, velocityTooHigh,
+    overflowsWidth: false, overflowsHeight: false,
+    undercutOverflowsStructural, hasGeometryViolation,
+    hasGlassInterference: false,
+    grilleContribRatio, undercutContribRatio: 1 - grilleContribRatio,
+    remediationHint: buildRemediationHint({
+      velocityTooLow, velocityTooHigh, overflowsWidth: false, overflowsHeight: false,
+      undercutOverflowsStructural, grilleOverflowsHeight: false,
+      hasGlassInterference: false,
+      openingType, grilleHeightMm: primaryLeaf.grilleHeightMm, maxAllowedHeightMm,
+      undercutHeightMm: ucH, doorWidthMm,
+      actualVelocityMs, maxVelocityMs, minVelocityMs, combinedMode: ucH > 0,
     }),
   };
 }

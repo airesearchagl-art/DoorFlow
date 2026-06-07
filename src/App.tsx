@@ -1,12 +1,10 @@
 import { useState, useMemo, useRef } from 'react';
 import { DoorOpen } from 'lucide-react';
 import {
-  type VentilationInputs,
-  type DoorType,
-  DEFAULTS,
-  DEFAULT_LEAF_CONFIG,
-  DOOR_WIDTH_PRESETS,
-  calculateVentilation,
+  type VentilationInputs, type DoorType, type SimMode, type ValidationConfig,
+  DEFAULTS, DEFAULT_LEAF_CONFIG, DOOR_WIDTH_PRESETS,
+  DEFAULT_VALIDATION_CONFIG,
+  calculateVentilation, validateVentilation,
 } from './core/ventilationEngine';
 import { ConfigPanel } from './components/ConfigPanel';
 import { DoorCanvas } from './components/DoorCanvas';
@@ -30,9 +28,10 @@ const DEFAULT_INPUTS: VentilationInputs = {
 
 export default function App() {
   const [inputs, setInputs] = useState<VentilationInputs>(DEFAULT_INPUTS);
+  const [simMode, setSimMode] = useState<SimMode>('calculate');
+  const [validationConfig, setValidationConfig] = useState<ValidationConfig>(DEFAULT_VALIDATION_CONFIG);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // When door type changes, auto-update total width preset
   function handleDoorTypeChange(newType: DoorType) {
     setInputs(prev => ({
       ...prev,
@@ -41,7 +40,10 @@ export default function App() {
     }));
   }
 
-  const result = useMemo(() => calculateVentilation(inputs), [inputs]);
+  const result = useMemo(() => {
+    if (simMode === 'validate') return validateVentilation(inputs, validationConfig);
+    return calculateVentilation(inputs);
+  }, [inputs, simMode, validationConfig]);
 
   const borderAccent = result.isSafe ? 'border-slate-800' : 'border-red-600/60';
 
@@ -62,6 +64,15 @@ export default function App() {
 
           <div className="ml-6 h-5 w-px bg-slate-700" />
 
+          {/* Mode badge */}
+          <div className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold border ${
+            simMode === 'validate'
+              ? 'border-violet-500/50 bg-violet-500/10 text-violet-300'
+              : 'border-sky-500/40 bg-sky-500/10 text-sky-300'
+          }`}>
+            {simMode === 'validate' ? '検証モード' : '算出モード'}
+          </div>
+
           <div className="flex items-center gap-4 text-xs">
             <span className="text-slate-400">
               風速:{' '}
@@ -70,7 +81,7 @@ export default function App() {
                   : result.velocityTooHigh ? 'text-red-400'
                   : 'text-amber-400'
               }`}>
-                {result.actualVelocityMs.toFixed(2)} m/s
+                {result.actualVelocityMs === Infinity ? '∞' : result.actualVelocityMs.toFixed(2)} m/s
               </span>
             </span>
             <span className="text-slate-400">
@@ -124,6 +135,10 @@ export default function App() {
             onDoorTypeChange={handleDoorTypeChange}
             grilleContribRatio={result.grilleContribRatio}
             undercutContribRatio={result.undercutContribRatio}
+            simMode={simMode}
+            onSimModeChange={setSimMode}
+            validationConfig={validationConfig}
+            onValidationConfigChange={setValidationConfig}
           />
         </div>
 
@@ -145,8 +160,8 @@ export default function App() {
             <div className="grid grid-cols-3 gap-3 text-center">
               {[
                 { label: 'Q = V_flow / 3600', sub: '通過秒風量 Q (m³/s)', value: `${result.airflowM3s.toFixed(4)} m³/s` },
-                { label: 'A_eff = Q / V',     sub: '必要有効面積 A_eff (㎡)', value: `${result.effectiveAreaM2.toFixed(4)} m²` },
-                { label: 'A_phys = A_eff / η', sub: '必要製品面積 A_phys (㎡)', value: `${result.physicalAreaM2.toFixed(4)} m²` },
+                { label: 'A_eff = Q / V',     sub: '有効面積 A_eff (㎡)',  value: `${result.effectiveAreaM2.toFixed(4)} m²` },
+                { label: 'A_phys = A_eff / η', sub: '製品面積 A_phys (㎡)', value: `${result.physicalAreaM2.toFixed(4)} m²` },
               ].map(f => (
                 <div key={f.label} className="flex flex-col gap-1">
                   <span className="text-[10px] font-mono text-slate-500 italic">{f.label}</span>
@@ -189,7 +204,7 @@ export default function App() {
 
         {/* Right: HUD Telemetry */}
         <div className="p-5 overflow-y-auto">
-          <HUDTelemetry result={result} inputs={inputs} />
+          <HUDTelemetry result={result} inputs={inputs} simMode={simMode} />
         </div>
       </main>
     </div>

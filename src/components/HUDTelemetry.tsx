@@ -1,9 +1,10 @@
-import { Activity, Maximize2, Zap, AlertTriangle, CheckCircle2, ArrowRight, Layers } from 'lucide-react';
-import { type VentilationResult, type VentilationInputs } from '../core/ventilationEngine';
+import { Activity, Maximize2, Zap, AlertTriangle, CheckCircle2, ArrowRight, Layers, FlaskConical } from 'lucide-react';
+import { type VentilationResult, type VentilationInputs, type SimMode } from '../core/ventilationEngine';
 
 interface HUDTelemetryProps {
   result: VentilationResult;
   inputs: VentilationInputs;
+  simMode?: SimMode;
 }
 
 function MetricCard({
@@ -94,10 +95,11 @@ const OPENING_TYPE_JA: Record<string, string> = {
   undercut: 'アンダーカット',
 };
 
-export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
+export function HUDTelemetry({ result, inputs, simMode = 'calculate' }: HUDTelemetryProps) {
   const velocityStatus = result.velocityTooHigh ? 'error' : result.velocityTooLow ? 'warn' : 'ok';
   const isGrille = inputs.openingType === 'louver' || inputs.openingType === 'punching';
   const isCombined = isGrille && result.undercutHeightMm > 0;
+  const isValidate = simMode === 'validate';
 
   return (
     <div className="flex flex-col gap-4">
@@ -116,6 +118,19 @@ export function HUDTelemetry({ result, inputs }: HUDTelemetryProps) {
           {result.isSafe ? '適合' : '不適合'}
         </div>
       </div>
+
+      {/* 検証モードバナー */}
+      {isValidate && (
+        <div className="flex items-start gap-2.5 bg-violet-500/10 border border-violet-500/30 rounded-xl px-3 py-2.5">
+          <FlaskConical size={14} className="text-violet-400 flex-shrink-0 mt-0.5" />
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[11px] font-semibold text-violet-300">検証モード稼働中</span>
+            <span className="text-[11px] text-violet-400/80">
+              入力された寸法から通過風速を逆算しています
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* 複合換気レイアウトバナー */}
       {isCombined && (

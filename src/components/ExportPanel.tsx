@@ -1,4 +1,4 @@
-import { Download, FileJson, Image, FileCode2 } from 'lucide-react';
+import { Download, FileJson, Image, FileText } from 'lucide-react';
 import type { VentilationInputs, VentilationResult } from '../core/ventilationEngine';
 
 interface ExportPanelProps {
@@ -7,72 +7,91 @@ interface ExportPanelProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
 }
 
-function buildDxfJson(inputs: VentilationInputs, result: VentilationResult) {
-  const { doorWidthMm, doorHeightMm, designOffsetMm } = inputs;
-  const entities = [];
+// ---------------------------------------------------------------------------
+// DXF generation — minimal AutoCAD R12 format (AC1009), units = mm
+// ---------------------------------------------------------------------------
+function dxfLine(layer: string, x1: number, y1: number, x2: number, y2: number): string {
+  return [
+    '  0', 'LINE',
+    '  8', layer,
+    ' 10', x1.toFixed(3),
+    ' 20', y1.toFixed(3),
+    ' 30', '0.000',
+    ' 11', x2.toFixed(3),
+    ' 21', y2.toFixed(3),
+    ' 31', '0.000',
+  ].join('\n');
+}
 
-  // Door outer frame
-  entities.push({
-    type: 'LWPOLYLINE', layer: 'DOOR_FRAME', closed: true,
-    vertices: [
-      { x: 0, y: 0 }, { x: doorWidthMm, y: 0 },
-      { x: doorWidthMm, y: doorHeightMm }, { x: 0, y: doorHeightMm },
-    ],
-  });
+function dxfRect(layer: string, x: number, y: number, w: number, h: number): string {
+  // DXF Y axis points up: flip y so origin is bottom-left
+  return [
+    dxfLine(layer, x,     y,     x + w, y),
+    dxfLine(layer, x + w, y,     x + w, y + h),
+    dxfLine(layer, x + w, y + h, x,     y + h),
+    dxfLine(layer, x,     y + h, x,     y),
+  ].join('\n');
+}
+
+function buildDxf(inputs: VentilationInputs, result: VentilationResult): string {
+  const { doorWidthMm, doorHeightMm, designOffsetMm } = inputs;
+  const lines: string[] = [];
+
+  // Door frame
+  lines.push(dxfRect('DOOR_FRAME', 0, 0, doorWidthMm, doorHeightMm));
 
   // Design boundary
-  entities.push({
-    type: 'LWPOLYLINE', layer: 'DESIGN_BOUNDARY', closed: true,
-    vertices: [
-      { x: designOffsetMm, y: designOffsetMm },
-      { x: doorWidthMm - designOffsetMm, y: designOffsetMm },
-      { x: doorWidthMm - designOffsetMm, y: doorHeightMm - designOffsetMm },
-      { x: designOffsetMm, y: doorHeightMm - designOffsetMm },
-    ],
-  });
+  lines.push(dxfRect(
+    'DESIGN_BOUNDARY',
+    designOffsetMm, designOffsetMm,
+    doorWidthMm - 2 * designOffsetMm, doorHeightMm - 2 * designOffsetMm,
+  ));
 
-  // Per-leaf grille rectangles
+  // Per-leaf grille and glass
   for (const leaf of result.leafLayouts) {
-    const cx = leaf.leafOffsetMm + leaf.leafWidthMm / 2;
-    const gx = cx - leaf.grilleWidthMm / 2;
-    const gy = doorHeightMm - designOffsetMm - leaf.grilleHeightMm;
     if (leaf.grilleWidthMm > 0 && leaf.grilleHeightMm > 0) {
-      entities.push({
-        type: 'LWPOLYLINE', layer: 'GRILLE', closed: true,
-        vertices: [
-          { x: gx, y: gy }, { x: gx + leaf.grilleWidthMm, y: gy },
-          { x: gx + leaf.grilleWidthMm, y: gy + leaf.grilleHeightMm },
-          { x: gx, y: gy + leaf.grilleHeightMm },
-        ],
-      });
+      const gx = leaf.leafOffsetMm + leaf.grilleXOffsetMm;
+      // Y=0 is door bottom; grille sits at bottom of design zone
+      const gy = designOffsetMm;
+      lines.push(dxfRect('GRILLE', gx, gy, leaf.grilleWidthMm, leaf.grilleHeightMm));
+    }
+
+    // Glass slit (Y measured from top — flip for DXF)
+    if (leaf.glassSlitYMm > 0 && leaf.glassSlitHeightMm > 0) {
+      const gsX = leaf.leafOffsetMm + leaf.glassSlitXOffsetMm;
+      const gsYBottom = doorHeightMm - leaf.glassSlitYMm;
+      lines.push(dxfRect('GLASS_SLIT', gsX, gsYBottom, leaf.glassSlitWidthMm, leaf.glassSlitHeightMm));
     }
   }
 
-  // Undercut at bottom
+  // Undercut
   if (result.undercutHeightMm > 0) {
-    entities.push({
-      type: 'LWPOLYLINE', layer: 'UNDERCUT', closed: true,
-      vertices: [
-        { x: 0, y: 0 }, { x: doorWidthMm, y: 0 },
-        { x: doorWidthMm, y: result.undercutHeightMm },
-        { x: 0, y: result.undercutHeightMm },
-      ],
-    });
+    lines.push(dxfRect('UNDERCUT', 0, -result.undercutHeightMm, doorWidthMm, result.undercutHeightMm));
   }
 
-  return {
-    format: 'DXF-JSON/1.0',
-    units: 'mm',
-    entities,
-    metadata: {
-      generated: new Date().toISOString(),
-      tool: 'DoorFlow',
-      doorType: inputs.doorType,
-      openingType: inputs.openingType,
-    },
-  };
+  const header = [
+    '  0', 'SECTION',
+    '  2', 'HEADER',
+    '  9', '$ACADVER',
+    '  1', 'AC1009',
+    '  9', '$INSUNITS',
+    ' 70', '     4',
+    '  0', 'ENDSEC',
+  ].join('\n');
+
+  const entities = [
+    '  0', 'SECTION',
+    '  2', 'ENTITIES',
+    lines.join('\n'),
+    '  0', 'ENDSEC',
+  ].join('\n');
+
+  return [header, entities, '  0', 'EOF'].join('\n');
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -82,16 +101,16 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
   function handleJsonExport() {
     const payload = {
       meta: { tool: 'DoorFlow', generated: new Date().toISOString() },
       inputs: {
         ...inputs,
-        leafConfigs: inputs.leafConfigs.map((cfg, i) => ({
-          leafIndex: i,
-          ...cfg,
-        })),
+        leafConfigs: inputs.leafConfigs.map((cfg, i) => ({ leafIndex: i, ...cfg })),
       },
       result: {
         airflowM3s: result.airflowM3s,
@@ -115,14 +134,13 @@ export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
     const svg = svgRef.current;
     if (!svg) return;
 
-    // Use viewBox for reliable dimensions (not clientWidth which depends on CSS)
     const vbAttr = svg.getAttribute('viewBox') ?? '0 0 560 720';
     const [, , vbW, vbH] = vbAttr.split(' ').map(Number);
     const SCALE = 2;
 
     const serializer = new XMLSerializer();
-    // Inject explicit width/height so the browser renders at full resolution
     let svgStr = serializer.serializeToString(svg);
+    // Inject explicit dimensions so the image renders at the correct size
     svgStr = svgStr.replace(/(<svg\b[^>]*?)(?:\s+width="[^"]*")?(?:\s+height="[^"]*")?/, (_m, open) =>
       `${open} width="${vbW}" height="${vbH}"`
     );
@@ -148,14 +166,13 @@ export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
     img.src = url;
   }
 
-  function handleDxfJsonExport() {
-    const dxf = buildDxfJson(inputs, result);
-    const blob = new Blob([JSON.stringify(dxf, null, 2)], { type: 'application/json' });
-    downloadBlob(blob, `doorflow_dxf_${Date.now()}.json`);
+  function handleDxfExport() {
+    const dxf = buildDxf(inputs, result);
+    const blob = new Blob([dxf], { type: 'application/dxf' });
+    downloadBlob(blob, `doorflow_${Date.now()}.dxf`);
   }
 
-  const btnBase =
-    'flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-medium border transition-colors duration-150';
+  const btnBase = 'flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-medium border transition-colors duration-150';
 
   return (
     <div className="space-y-3">
@@ -166,32 +183,27 @@ export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
         </span>
       </div>
 
-      <button
-        onClick={handleJsonExport}
-        className={`${btnBase} border-sky-700/50 bg-sky-900/20 text-sky-300 hover:bg-sky-900/40`}
-      >
+      <button onClick={handleJsonExport}
+        className={`${btnBase} border-sky-700/50 bg-sky-900/20 text-sky-300 hover:bg-sky-900/40`}>
         <FileJson size={14} />
         <span>JSON パラメータ書き出し</span>
       </button>
 
-      <button
-        onClick={handlePngExport}
-        className={`${btnBase} border-violet-700/50 bg-violet-900/20 text-violet-300 hover:bg-violet-900/40`}
-      >
+      <button onClick={handlePngExport}
+        className={`${btnBase} border-violet-700/50 bg-violet-900/20 text-violet-300 hover:bg-violet-900/40`}>
         <Image size={14} />
         <span>PNG 立面図ダウンロード</span>
       </button>
 
-      <button
-        onClick={handleDxfJsonExport}
-        className={`${btnBase} border-amber-700/50 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40`}
-      >
-        <FileCode2 size={14} />
-        <span>DXF-JSON 図面データ出力</span>
+      <button onClick={handleDxfExport}
+        className={`${btnBase} border-amber-700/50 bg-amber-900/20 text-amber-300 hover:bg-amber-900/40`}>
+        <FileText size={14} />
+        <span>DXF 図面データ出力（CAD対応）</span>
       </button>
 
       <p className="text-[10px] text-slate-600 leading-tight pt-1">
-        PNG は現在の立面図 SVG を 2× 解像度でレンダリング。DXF-JSON は外部 CAD ツールへのインポート用途向け簡易フォーマット。
+        PNG は SVG を 2× 解像度でレンダリング。DXF は AutoCAD R12 形式（AC1009）、単位 mm、
+        CAD ソフトで直接開いて寸法確認が可能。
       </p>
     </div>
   );

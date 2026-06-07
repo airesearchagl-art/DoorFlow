@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import {
   Ruler, Wind, Sliders, Settings2, LayoutGrid,
   MoveHorizontal, DoorOpen, GlassWater, MoveVertical, Layers, AlignCenter,
+  FlaskConical, Calculator,
 } from 'lucide-react';
 import {
   type VentilationInputs, type OpeningType, type DoorType, type LeafConfig, type GrilleAlign,
+  type SimMode, type ValidationConfig, type ValidationLeafConfig,
   DEFAULTS, DEFAULT_LEAF_CONFIG, DOOR_WIDTH_PRESETS, GRILLE_ALIGN_LABELS,
 } from '../core/ventilationEngine';
 
@@ -14,6 +16,10 @@ interface ConfigPanelProps {
   onDoorTypeChange: (newType: DoorType) => void;
   grilleContribRatio: number;
   undercutContribRatio: number;
+  simMode: SimMode;
+  onSimModeChange: (m: SimMode) => void;
+  validationConfig: ValidationConfig;
+  onValidationConfigChange: (c: ValidationConfig) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -292,10 +298,71 @@ function LeafConfigPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Validation mode panel
+// ---------------------------------------------------------------------------
+function ValidationPanel({
+  inputs, validationConfig, onChange,
+}: {
+  inputs: VentilationInputs;
+  validationConfig: ValidationConfig;
+  onChange: (c: ValidationConfig) => void;
+}) {
+  const leaves = inputs.doorType === 'single' ? 1 : 2;
+  const isParentChild = inputs.doorType === 'parent-child';
+  const leafLabels = isParentChild ? ['親扉', '子扉'] : inputs.doorType === 'double' ? ['左扉', '右扉'] : ['扉'];
+
+  function setLeaf(idx: 0 | 1, key: keyof ValidationLeafConfig, v: number) {
+    const next = [...validationConfig.leafConfigs] as [ValidationLeafConfig, ValidationLeafConfig];
+    next[idx] = { ...next[idx], [key]: Math.max(0, v) };
+    onChange({ ...validationConfig, leafConfigs: next });
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="bg-violet-900/20 border border-violet-600/40 rounded-lg px-3 py-2 text-[11px] text-violet-300 leading-snug">
+        検証モード：実寸法を入力し、発生する通過風速をリアルタイム確認します。
+        算出モードの「必要サイズ計算」入力は無効化されます。
+      </div>
+
+      {Array.from({ length: leaves }).map((_, i) => {
+        const idx = i as 0 | 1;
+        const lc = validationConfig.leafConfigs[idx];
+        return (
+          <div key={idx} className="bg-slate-800/60 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+            <div className="text-[10px] uppercase tracking-widest text-violet-400 font-semibold mb-1">
+              {leafLabels[i]} — 寸法入力
+            </div>
+            <SliderNumberInput label="ガラリ幅 (W)" value={lc.grilleWidthMm} unit="mm"
+              min={0} max={Math.max(50, inputs.doorWidthMm)} step={10}
+              onChange={v => setLeaf(idx, 'grilleWidthMm', v)} color="amber" />
+            <SliderNumberInput label="ガラリ高さ (H)" value={lc.grilleHeightMm} unit="mm"
+              min={0} max={Math.max(50, inputs.doorHeightMm)} step={10}
+              onChange={v => setLeaf(idx, 'grilleHeightMm', v)} color="violet" />
+          </div>
+        );
+      })}
+
+      <div className="bg-slate-800/60 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+        <div className="text-[10px] uppercase tracking-widest text-amber-400 font-semibold mb-1">
+          アンダーカット補足
+        </div>
+        <SliderNumberInput label="アンダーカット高さ" value={validationConfig.undercutHeightMm} unit="mm"
+          min={0} max={30} step={1}
+          onChange={v => onChange({ ...validationConfig, undercutHeightMm: v })} color="amber" />
+        {validationConfig.undercutHeightMm > 25 && (
+          <span className="text-[11px] text-red-400">⚠ 構造上限（25mm）を超過</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main ConfigPanel
 // ---------------------------------------------------------------------------
 export function ConfigPanel({
   inputs, onChange, onDoorTypeChange, grilleContribRatio, undercutContribRatio,
+  simMode, onSimModeChange, validationConfig, onValidationConfigChange,
 }: ConfigPanelProps) {
   const [activeLeafTab, setActiveLeafTab] = useState<0 | 1>(0);
 
@@ -321,14 +388,47 @@ export function ConfigPanel({
   const currentLeafW = activeLeafTab === 0 ? mainLeafW : childLeafW;
   const leafTabLabels = isParentChild ? ['親扉', '子扉'] : ['左扉', '右扉'];
 
+  const isValidate = simMode === 'validate';
+
   return (
     <aside className="flex flex-col gap-0 bg-slate-900 border-r border-slate-800 p-5 min-h-full">
-      <div className="flex items-center gap-2 mb-6">
+      <div className="flex items-center gap-2 mb-4">
         <div className="w-7 h-7 rounded-lg bg-sky-500/20 flex items-center justify-center">
           <Settings2 size={15} className="text-sky-400" />
         </div>
         <h2 className="text-sm font-semibold text-slate-200">設計パラメータ設定</h2>
       </div>
+
+      {/* ── モード切替 ────────────────────────────── */}
+      <div className="flex gap-1 p-1 bg-slate-800 rounded-xl mb-5 border border-slate-700">
+        <button
+          onClick={() => onSimModeChange('calculate')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+            !isValidate ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Calculator size={12} />
+          算出モード
+        </button>
+        <button
+          onClick={() => onSimModeChange('validate')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+            isValidate ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <FlaskConical size={12} />
+          検証モード
+        </button>
+      </div>
+
+      {/* ── 検証モードパネル ──────────────────────── */}
+      {isValidate && (
+        <ValidationPanel
+          inputs={inputs}
+          validationConfig={validationConfig}
+          onChange={onValidationConfigChange}
+        />
+      )}
 
       {/* ── ドアタイプ ─────────────────────────────── */}
       <SectionHeader icon={DoorOpen} label="建具構成タイプ" accent="violet" />
@@ -377,7 +477,7 @@ export function ConfigPanel({
 
       {/* ── 換気量 ─────────────────────────────────── */}
       <SectionHeader icon={Wind} label="設備要求換気量" />
-      <div className="flex flex-col gap-3">
+      <div className={`flex flex-col gap-3 ${isValidate ? 'opacity-40 pointer-events-none select-none' : ''}`}>
         <SliderNumberInput label="必要風量 (Q)" value={inputs.requiredAirflowM3h} unit="m³/h"
           min={10} max={1000} step={5} onChange={v => set('requiredAirflowM3h', v)}
           color="emerald" freeMax />
@@ -385,6 +485,9 @@ export function ConfigPanel({
           min={0.5} max={2.5} step={0.1} onChange={v => set('minVelocityMs', v)} />
         <SliderNumberInput label="許容最大風速" value={inputs.maxVelocityMs} unit="m/s"
           min={2.0} max={6.0} step={0.1} onChange={v => set('maxVelocityMs', v)} />
+        {isValidate && (
+          <p className="text-[10px] text-violet-400 -mt-1">検証モード中は無効（寸法入力欄を使用）</p>
+        )}
       </div>
 
       {/* ── 開口方式 ───────────────────────────────── */}
@@ -408,8 +511,8 @@ export function ConfigPanel({
         ))}
       </div>
 
-      {/* ── ガラリ・ガラス設定（per-leaf tabs） ───── */}
-      {isGrille && (
+      {/* ── ガラリ・ガラス設定（per-leaf tabs）— calc mode only ── */}
+      {isGrille && !isValidate && (
         <>
           <SectionHeader icon={Layers} label="ガラリ・ガラス設定" accent="amber" />
 

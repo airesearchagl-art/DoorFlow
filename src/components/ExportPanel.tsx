@@ -115,21 +115,31 @@ export function ExportPanel({ inputs, result, svgRef }: ExportPanelProps) {
     const svg = svgRef.current;
     if (!svg) return;
 
+    // Use viewBox for reliable dimensions (not clientWidth which depends on CSS)
+    const vbAttr = svg.getAttribute('viewBox') ?? '0 0 560 720';
+    const [, , vbW, vbH] = vbAttr.split(' ').map(Number);
+    const SCALE = 2;
+
     const serializer = new XMLSerializer();
-    const svgStr = serializer.serializeToString(svg);
+    // Inject explicit width/height so the browser renders at full resolution
+    let svgStr = serializer.serializeToString(svg);
+    svgStr = svgStr.replace(/(<svg\b[^>]*?)(?:\s+width="[^"]*")?(?:\s+height="[^"]*")?/, (_m, open) =>
+      `${open} width="${vbW}" height="${vbH}"`
+    );
+
     const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(svgBlob);
 
     const img = new window.Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = svg.clientWidth * 2;
-      canvas.height = svg.clientHeight * 2;
+      canvas.width = vbW * SCALE;
+      canvas.height = vbH * SCALE;
       const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#0b1120';
+      ctx.fillStyle = '#0d1526';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(2, 2);
-      ctx.drawImage(img, 0, 0);
+      ctx.scale(SCALE, SCALE);
+      ctx.drawImage(img, 0, 0, vbW, vbH);
       URL.revokeObjectURL(url);
       canvas.toBlob(b => {
         if (b) downloadBlob(b, `doorflow_${Date.now()}.png`);

@@ -7,19 +7,22 @@ interface DoorCanvasProps {
   svgRef?: React.RefObject<SVGSVGElement | null>;
 }
 
-const CANVAS_W = 540;
-const CANVAS_H = 650;
-const PAD = 32;
+// Canvas dimensions — enough room for door + undercut gap + dimension annotations
+const CANVAS_W = 560;
+const CANVAS_H = 720;
+const PAD_X = 52;  // left/right padding (room for height dim line)
+const PAD_TOP = 28;
+const PAD_BOT = 90; // room for undercut rect + dim labels below door
 
 function useDoorScale(widthMm: number, heightMm: number) {
   return useMemo(() => {
-    const availW = CANVAS_W - PAD * 2;
-    const availH = CANVAS_H - PAD * 2 - 40;
+    const availW = CANVAS_W - PAD_X * 2;
+    const availH = CANVAS_H - PAD_TOP - PAD_BOT;
     const scale = Math.min(availW / widthMm, availH / heightMm);
     const doorW = widthMm * scale;
     const doorH = heightMm * scale;
     const originX = (CANVAS_W - doorW) / 2;
-    const originY = PAD + 14;
+    const originY = PAD_TOP;
     return { scale, doorW, doorH, originX, originY };
   }, [widthMm, heightMm]);
 }
@@ -66,12 +69,11 @@ function PunchingPattern({ x, y, w, h, color = '#63b3ed' }: {
   );
 }
 
-// One door leaf — receives per-leaf layout from engine result
+// Renders one door leaf using pre-computed layout from engine
 function DoorLeaf({
-  x, y, w, h,
-  offsetPx, scale,
+  x, y, w, h, offsetPx, scale,
   openingType, isGrille,
-  grilleW, grilleH, grilleColor,
+  grilleColor,
   showHandle, showHinge,
   layout,
   doorHeightMm,
@@ -80,7 +82,7 @@ function DoorLeaf({
   x: number; y: number; w: number; h: number;
   offsetPx: number; scale: number;
   openingType: string; isGrille: boolean;
-  grilleW: number; grilleH: number; grilleColor: string;
+  grilleColor: string;
   showHandle: boolean; showHinge: boolean;
   layout: LeafLayout;
   doorHeightMm: number;
@@ -91,25 +93,27 @@ function DoorLeaf({
   const allowedX = x + offsetPx;
   const allowedY = y + offsetPx;
 
-  const safeGrilleW = Math.min(grilleW, leafAllowedW);
-  const safeGrilleH = Math.min(grilleH, leafAllowedH);
-  const gX = allowedX + (leafAllowedW - safeGrilleW) / 2;
+  // Grille position from engine (grilleXOffsetMm is from leaf-left edge)
+  const gW = Math.min(layout.grilleWidthMm * scale, leafAllowedW);
+  const gH = Math.min(layout.grilleHeightMm * scale, leafAllowedH);
+  const gX = x + layout.grilleXOffsetMm * scale;
 
-  // Glass slit constraint from layout
-  const hasGlass = layout.glassSlitYMm > 0;
-  const glassConstraintPx = hasGlass
-    ? Math.max(0, (layout.glassSlitYMm / doorHeightMm) * h - offsetPx)
-    : 0;
-  const grilleZoneTopPx = allowedY + glassConstraintPx;
-  const grilleZoneH = allowedY + leafAllowedH - grilleZoneTopPx;
-  const safeFinalH = Math.min(safeGrilleH, grilleZoneH);
-  const gY = grilleZoneTopPx + grilleZoneH - safeFinalH - 4 * scale;
+  // Grille sits at bottom of the available grille zone
+  // glassSlitYMm defines where glass bottom is → grille zone starts there
+  // hasGlass: layout.glassSlitYMm > 0
+  const glassBottomY = layout.glassSlitYMm > 0
+    ? y + (layout.glassSlitYMm / doorHeightMm) * h
+    : allowedY;
+  const grilleZoneTopY = layout.glassSlitYMm > 0 ? glassBottomY : allowedY;
+  const grilleZoneH = allowedY + leafAllowedH - grilleZoneTopY;
+  const safeGH = Math.min(gH, grilleZoneH);
+  const gY = grilleZoneTopY + grilleZoneH - safeGH - 4 * scale;
 
-  // Glass slit visual: height = glassSlitHeightMm scaled
+  // Glass slit from engine values
   const glassH = (layout.glassSlitHeightMm / doorHeightMm) * h;
-  const glassW = Math.min(w * 0.65, leafAllowedW);
-  const glassX = x + (w - glassW) / 2;
-  const glassY = y + offsetPx;
+  const glassW = Math.min(layout.glassSlitWidthMm * scale, w * 0.95);
+  const glassX = x + layout.glassSlitXOffsetMm * scale;
+  const glassY = allowedY;
 
   return (
     <g>
@@ -123,55 +127,57 @@ function DoorLeaf({
         fill="none" stroke="#1e3a5f" strokeWidth={0.8} rx={1} />
 
       {/* Glass slit */}
-      {hasGlass && glassH > 2 && (
+      {layout.glassSlitYMm > 0 && glassH > 2 && (
         <g>
           <rect x={glassX} y={glassY} width={glassW} height={glassH}
-            fill={layout.glassInterference ? 'rgba(252,129,129,0.08)' : 'rgba(99,179,237,0.06)'}
+            fill={layout.glassInterference ? 'rgba(252,129,129,0.08)' : 'rgba(99,179,237,0.07)'}
             stroke={layout.glassInterference ? '#fc8181' : '#3182ce'}
             strokeWidth={1} strokeDasharray="4 2" rx={2} />
           {Array.from({ length: Math.floor(glassH / 8) }).map((_, i) => (
             <line key={i}
               x1={glassX + 4} y1={glassY + i * 8 + 4}
               x2={glassX + glassW - 4} y2={glassY + i * 8 + 4}
-              stroke={layout.glassInterference ? 'rgba(252,129,129,0.2)' : 'rgba(99,179,237,0.15)'}
+              stroke={layout.glassInterference ? 'rgba(252,129,129,0.25)' : 'rgba(99,179,237,0.18)'}
               strokeWidth={0.5} />
           ))}
           <text x={glassX + glassW / 2} y={glassY + glassH / 2 + 4}
             textAnchor="middle"
-            fill={layout.glassInterference ? '#fc8181' : '#3182ce'}
+            fill={layout.glassInterference ? '#fc8181' : '#63b3ed'}
             fontSize={7} fontFamily="monospace" opacity={0.9}>
-            {layout.glassInterference ? '⚠ ガラス干渉' : `明かり窓 ${layout.glassSlitHeightMm.toFixed(0)}mm`}
+            {layout.glassInterference
+              ? '⚠ ガラス干渉'
+              : `明かり窓 ${layout.glassSlitHeightMm.toFixed(0)}mm${layout.glassSlitLinked ? ' [連動]' : ''}`}
           </text>
-          {/* Slit bottom line */}
+          {/* Glass bottom line */}
           <line
             x1={x + 4} y1={y + (layout.glassSlitYMm / doorHeightMm) * h}
             x2={x + w - 4} y2={y + (layout.glassSlitYMm / doorHeightMm) * h}
             stroke={layout.glassInterference ? '#fc8181' : '#38bdf8'}
-            strokeWidth={1} strokeDasharray="3 2" opacity={0.8} />
+            strokeWidth={1} strokeDasharray="3 2" opacity={0.85} />
         </g>
       )}
 
-      {/* Design boundary dashed rect */}
+      {/* Design boundary */}
       <rect x={allowedX} y={allowedY} width={leafAllowedW} height={leafAllowedH}
         fill="none" stroke="#d4af37" strokeWidth={0.8} strokeDasharray="5 3" opacity={0.7} />
 
-      {/* Grille zone top constraint line when glass slit active */}
-      {hasGlass && !layout.glassInterference && (
-        <line x1={allowedX} y1={grilleZoneTopPx}
-          x2={allowedX + leafAllowedW} y2={grilleZoneTopPx}
-          stroke="#38bdf8" strokeWidth={0.8} strokeDasharray="3 2" opacity={0.6} />
+      {/* Grille zone top boundary when glass slit active */}
+      {layout.glassSlitYMm > 0 && !layout.glassInterference && (
+        <line x1={allowedX} y1={grilleZoneTopY}
+          x2={allowedX + leafAllowedW} y2={grilleZoneTopY}
+          stroke="#38bdf8" strokeWidth={0.8} strokeDasharray="3 2" opacity={0.55} />
       )}
 
       {/* Grille */}
-      {isGrille && safeFinalH > 2 && (
+      {isGrille && safeGH > 2 && gW > 2 && (
         <>
           {openingType === 'louver' ? (
-            <LouverPattern x={gX} y={gY} w={safeGrilleW} h={safeFinalH}
-              rows={Math.max(3, Math.round(safeFinalH / 16))} color={grilleColor} />
+            <LouverPattern x={gX} y={gY} w={gW} h={safeGH}
+              rows={Math.max(3, Math.round(safeGH / 16))} color={grilleColor} />
           ) : (
-            <PunchingPattern x={gX} y={gY} w={safeGrilleW} h={safeFinalH} color={grilleColor} />
+            <PunchingPattern x={gX} y={gY} w={gW} h={safeGH} color={grilleColor} />
           )}
-          <text x={gX + safeGrilleW / 2} y={Math.max(gY - 5, allowedY + 6)}
+          <text x={gX + gW / 2} y={Math.max(gY - 4, allowedY + 7)}
             textAnchor="middle" fill={grilleColor} fontSize={7} fontFamily="monospace">
             W{layout.grilleWidthMm.toFixed(0)}×H{layout.grilleHeightMm.toFixed(0)}
           </text>
@@ -192,23 +198,21 @@ function DoorLeaf({
 
       {/* Hinges */}
       {showHinge && [0.2, 0.5, 0.8].map((fy, i) => (
-        <rect key={i} x={x + 2} y={y + h * fy - 5}
-          width={7} height={10}
+        <rect key={i} x={x + 2} y={y + h * fy - 5} width={7} height={10}
           fill="#1e3a5f" stroke="#2d4a6e" strokeWidth={1} rx={1} />
       ))}
 
       {/* Violation frame */}
       {isViolation && (
         <rect x={x} y={y} width={w} height={h}
-          fill="none" stroke="#fc8181" strokeWidth={1.5}
-          strokeDasharray="8 4" opacity={0.5} />
+          fill="none" stroke="#fc8181" strokeWidth={1.5} strokeDasharray="8 4" opacity={0.5} />
       )}
     </g>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Main component
+// Main export
 // ---------------------------------------------------------------------------
 export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
   const internalRef = useRef<SVGSVGElement>(null);
@@ -226,18 +230,16 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
   const grilleColor = isViolation ? '#fc8181' : '#63b3ed';
   const ucColor = result.undercutOverflowsStructural ? '#fc8181' : '#f6ad55';
 
-  const ucHeightPx = Math.min(result.undercutHeightMm * scale, 36);
+  // Cap undercut visual at 40px but always show something meaningful
+  const ucHeightPx = hasUndercut ? Math.max(6, Math.min(result.undercutHeightMm * scale, 40)) : 0;
 
   const isSingle = inputs.doorType === 'single';
   const isDouble = inputs.doorType === 'double';
   const isParentChild = inputs.doorType === 'parent-child';
 
-  // Map leaf layouts to SVG coordinates
   const leaves = result.leafLayouts.map(l => ({
     xPx: originX + (l.leafOffsetMm / inputs.doorWidthMm) * doorW,
     wPx: (l.leafWidthMm / inputs.doorWidthMm) * doorW,
-    grilleW: l.grilleWidthMm * scale,
-    grilleH: l.grilleHeightMm * scale,
     layout: l,
   }));
 
@@ -246,16 +248,22 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
     : (isDouble || isParentChild) ? '#7c3aed'
     : '#1e3a5f';
 
+  // Y positions for undercut and dimension annotations
+  const doorBottomY = originY + doorH;
+  const frameBottomY = doorBottomY + frameThickness;
+  const ucBottomY = frameBottomY + ucHeightPx;
+  const dimY = ucBottomY + 20;
+
   return (
     <div className="flex flex-col items-center gap-2">
-      {/* Door type label */}
-      <div className="flex items-center gap-3 text-xs text-slate-400">
+      {/* Info strip */}
+      <div className="flex items-center gap-3 text-xs text-slate-400 h-5">
         {(isDouble || isParentChild) && (
-          <div className="text-[11px] text-violet-400 font-mono">
+          <span className="text-[11px] text-violet-400 font-mono">
             {isDouble
-              ? `両開き — 各扉 ${(inputs.doorWidthMm / 2).toFixed(0)}mm（左右対称）`
+              ? `両開き — 各扉 ${(inputs.doorWidthMm / 2).toFixed(0)}mm`
               : `親子扉 — 親${(inputs.doorWidthMm - inputs.childWidthMm).toFixed(0)}mm / 子${inputs.childWidthMm}mm`}
-          </div>
+          </span>
         )}
         {result.hasGlassInterference && (
           <span className="text-red-400 text-[10px] font-mono animate-pulse">⚠ ガラス干渉</span>
@@ -280,7 +288,7 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
         </defs>
         <rect width={CANVAS_W} height={CANVAS_H} fill="url(#gridLarge)" />
 
-        {/* Outer casing frame */}
+        {/* Outer casing */}
         <rect
           x={originX - frameThickness} y={originY - frameThickness}
           width={doorW + frameThickness * 2} height={doorH + frameThickness * 2}
@@ -294,7 +302,6 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
             x={originX} y={originY} w={doorW} h={doorH}
             offsetPx={offsetPx} scale={scale}
             openingType={inputs.openingType} isGrille={isGrille}
-            grilleW={leaves[0]?.grilleW ?? 0} grilleH={leaves[0]?.grilleH ?? 0}
             grilleColor={grilleColor}
             showHandle showHinge
             layout={leaves[0]?.layout ?? result.leafLayouts[0]}
@@ -309,7 +316,6 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
                 x={leaf.xPx} y={originY} w={leaf.wPx} h={doorH}
                 offsetPx={offsetPx} scale={scale}
                 openingType={inputs.openingType} isGrille={isGrille}
-                grilleW={leaf.grilleW} grilleH={leaf.grilleH}
                 grilleColor={grilleColor}
                 showHandle={idx === 0}
                 showHinge={idx === 0}
@@ -318,7 +324,7 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
                 isViolation={isViolation}
               />
             ))}
-            {/* Leaf divider line */}
+            {/* Leaf divider */}
             {leaves.length > 1 && (
               <line
                 x1={leaves[1].xPx} y1={originY}
@@ -329,10 +335,9 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
             {/* Leaf width labels */}
             {leaves.map((leaf, idx) => (
               <text key={idx}
-                x={leaf.xPx + leaf.wPx / 2} y={originY - 8}
+                x={leaf.xPx + leaf.wPx / 2} y={originY - 10}
                 textAnchor="middle" fill="#7c3aed" fontSize={8} fontFamily="monospace" opacity={0.9}>
-                {leaf.layout.leafWidthMm.toFixed(0)}mm
-                {isParentChild && (idx === 0 ? ' (親)' : ' (子)')}
+                {leaf.layout.leafWidthMm.toFixed(0)}mm{isParentChild && (idx === 0 ? '(親)' : '(子)')}
               </text>
             ))}
           </>
@@ -349,72 +354,68 @@ export function DoorCanvas({ inputs, result, svgRef }: DoorCanvasProps) {
           <g>
             <rect
               x={originX + offsetPx}
-              y={originY + doorH - Math.min(result.requiredOpeningHeightMm * scale, 30)}
+              y={doorBottomY - Math.min(result.requiredOpeningHeightMm * scale, 30)}
               width={result.requiredOpeningWidthMm * scale}
               height={Math.min(result.requiredOpeningHeightMm * scale, 30)}
               fill={`${grilleColor}18`} stroke={grilleColor} strokeWidth={1.5} strokeDasharray="5 2"
             />
             <text
               x={originX + offsetPx + result.requiredOpeningWidthMm * scale / 2}
-              y={originY + doorH - Math.min(result.requiredOpeningHeightMm * scale, 30) - 5}
+              y={doorBottomY - Math.min(result.requiredOpeningHeightMm * scale, 30) - 5}
               textAnchor="middle" fill={grilleColor} fontSize={9}>
               アンダーカット {result.requiredOpeningHeightMm.toFixed(1)}mm
             </text>
           </g>
         )}
 
-        {/* Undercut gap (combined mode) */}
+        {/* Combined-mode undercut gap */}
         {isGrille && hasUndercut && (
           <g>
-            <line
-              x1={originX - frameThickness - 4} y1={originY + doorH + frameThickness + ucHeightPx}
-              x2={originX + doorW + frameThickness + 4} y2={originY + doorH + frameThickness + ucHeightPx}
-              stroke="#4a5568" strokeWidth={1} strokeDasharray="4 3"
-            />
             <rect
-              x={originX} y={originY + doorH}
-              width={doorW} height={Math.max(ucHeightPx, 2)}
+              x={originX} y={doorBottomY}
+              width={doorW} height={ucHeightPx}
               fill={`${ucColor}18`} stroke={ucColor} strokeWidth={1.5} strokeDasharray="5 2"
             />
-            <text x={originX + doorW / 2} y={originY + doorH + ucHeightPx / 2 + 4}
+            <text x={originX + doorW / 2} y={doorBottomY + ucHeightPx / 2 + 4}
               textAnchor="middle" fill={ucColor} fontSize={8} fontFamily="monospace">
-              ＋ アンダーカット {result.undercutHeightMm.toFixed(1)}mm
+              ＋ UC {result.undercutHeightMm.toFixed(1)}mm
               {result.undercutOverflowsStructural ? ' ⚠' : ''}
             </text>
-            <line x1={originX + doorW + frameThickness + 6} y1={originY + doorH}
-              x2={originX + doorW + frameThickness + 6} y2={originY + doorH + ucHeightPx}
+            {/* Dimension ticks */}
+            <line x1={originX + doorW + frameThickness + 6} y1={doorBottomY}
+              x2={originX + doorW + frameThickness + 6} y2={doorBottomY + ucHeightPx}
               stroke={ucColor} strokeWidth={1} />
-            <line x1={originX + doorW + frameThickness + 3} y1={originY + doorH}
-              x2={originX + doorW + frameThickness + 9} y2={originY + doorH}
+            <line x1={originX + doorW + frameThickness + 3} y1={doorBottomY}
+              x2={originX + doorW + frameThickness + 9} y2={doorBottomY}
               stroke={ucColor} strokeWidth={1} />
-            <line x1={originX + doorW + frameThickness + 3} y1={originY + doorH + ucHeightPx}
-              x2={originX + doorW + frameThickness + 9} y2={originY + doorH + ucHeightPx}
+            <line x1={originX + doorW + frameThickness + 3} y1={doorBottomY + ucHeightPx}
+              x2={originX + doorW + frameThickness + 9} y2={doorBottomY + ucHeightPx}
               stroke={ucColor} strokeWidth={1} />
           </g>
         )}
 
-        {/* Dimension: width */}
-        <line
-          x1={originX} y1={originY + doorH + frameThickness + (hasUndercut && isGrille ? ucHeightPx + 18 : 14)}
-          x2={originX + doorW} y2={originY + doorH + frameThickness + (hasUndercut && isGrille ? ucHeightPx + 18 : 14)}
-          stroke="#4a5568" strokeWidth={1} />
-        <text
-          x={originX + doorW / 2}
-          y={originY + doorH + frameThickness + (hasUndercut && isGrille ? ucHeightPx + 30 : 26)}
+        {/* Width dimension line */}
+        <line x1={originX} y1={dimY} x2={originX + doorW} y2={dimY} stroke="#4a5568" strokeWidth={1} />
+        <line x1={originX} y1={dimY - 4} x2={originX} y2={dimY + 4} stroke="#4a5568" strokeWidth={1} />
+        <line x1={originX + doorW} y1={dimY - 4} x2={originX + doorW} y2={dimY + 4} stroke="#4a5568" strokeWidth={1} />
+        <text x={originX + doorW / 2} y={dimY + 12}
           textAnchor="middle" fill="#64748b" fontSize={9} fontFamily="monospace">
           {inputs.doorWidthMm} mm
         </text>
 
-        {/* Dimension: height */}
-        <line
-          x1={originX - frameThickness - 14} y1={originY}
-          x2={originX - frameThickness - 14} y2={originY + doorH}
+        {/* Height dimension line */}
+        <line x1={originX - frameThickness - 16} y1={originY}
+          x2={originX - frameThickness - 16} y2={doorBottomY}
           stroke="#4a5568" strokeWidth={1} />
+        <line x1={originX - frameThickness - 20} y1={originY}
+          x2={originX - frameThickness - 12} y2={originY} stroke="#4a5568" strokeWidth={1} />
+        <line x1={originX - frameThickness - 20} y1={doorBottomY}
+          x2={originX - frameThickness - 12} y2={doorBottomY} stroke="#4a5568" strokeWidth={1} />
         <text
-          x={originX - frameThickness - 20}
+          x={originX - frameThickness - 26}
           y={originY + doorH / 2}
           textAnchor="middle" fill="#64748b" fontSize={9} fontFamily="monospace"
-          transform={`rotate(-90, ${originX - frameThickness - 20}, ${originY + doorH / 2})`}>
+          transform={`rotate(-90, ${originX - frameThickness - 26}, ${originY + doorH / 2})`}>
           {inputs.doorHeightMm} mm
         </text>
       </svg>

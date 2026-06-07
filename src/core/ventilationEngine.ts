@@ -3,19 +3,30 @@
 
 export type OpeningType = 'louver' | 'punching' | 'undercut';
 export type DoorType = 'single' | 'double' | 'parent-child';
+export type GrilleAlign = 'center' | 'left' | 'right' | 'far-left' | 'far-right';
+
+export const GRILLE_ALIGN_LABELS: Record<GrilleAlign, string> = {
+  center:      '中央下',
+  left:        '左下',
+  right:       '右下',
+  'far-left':  '左端',
+  'far-right': '右端',
+};
 
 export interface LeafConfig {
   selectedLouverWidth: number;  // 0 = auto
   louverHeightFixed: boolean;
   louverHeight: number;         // mm
   glassSlitYMm: number;         // 0 = no constraint; distance from door top to slit bottom
+  grilleAlign: GrilleAlign;     // horizontal placement preset
+  glassSlitLinked: boolean;     // true → glass bottom Y snaps to grille top, W = grille W
 }
 
 export interface VentilationInputs {
   doorWidthMm: number;
   doorHeightMm: number;
   doorType: DoorType;
-  childWidthMm: number;           // parent-child: child (right) leaf width
+  childWidthMm: number;
   designOffsetMm: number;
 
   requiredAirflowM3h: number;
@@ -25,20 +36,24 @@ export interface VentilationInputs {
   openingType: OpeningType;
   openingRate: number;
 
-  // Per-leaf configs: [0] = main/left, [1] = child/right
   leafConfigs: [LeafConfig, LeafConfig];
 }
 
 export interface LeafLayout {
   leafWidthMm: number;
   leafOffsetMm: number;
+  // Grille
   grilleWidthMm: number;
   grilleHeightMm: number;
   grilleEffectiveAreaM2: number;
+  grilleXOffsetMm: number;      // X from leaf-left edge
   // Glass slit
-  glassSlitYMm: number;       // configured value (0 = none)
-  glassSlitHeightMm: number;  // actual rendered glass height within design zone
-  glassInterference: boolean; // grille would collide with glass zone
+  glassSlitYMm: number;         // effective slit bottom Y (may be auto-computed in linked mode)
+  glassSlitHeightMm: number;
+  glassSlitWidthMm: number;
+  glassSlitXOffsetMm: number;   // X from leaf-left edge
+  glassSlitLinked: boolean;
+  glassInterference: boolean;
 }
 
 export interface VentilationResult {
@@ -48,7 +63,6 @@ export interface VentilationResult {
 
   leafLayouts: LeafLayout[];
 
-  // Aggregate totals
   grilleWidthMm: number;
   grilleHeightMm: number;
   grilleEffectiveAreaM2: number;
@@ -70,7 +84,7 @@ export interface VentilationResult {
   overflowsHeight: boolean;
   undercutOverflowsStructural: boolean;
   hasGeometryViolation: boolean;
-  hasGlassInterference: boolean;   // any leaf has glass/grille collision
+  hasGlassInterference: boolean;
 
   grilleContribRatio: number;
   undercutContribRatio: number;
@@ -83,6 +97,8 @@ export const DEFAULT_LEAF_CONFIG: LeafConfig = {
   louverHeightFixed: false,
   louverHeight: 400,
   glassSlitYMm: 0,
+  grilleAlign: 'center',
+  glassSlitLinked: false,
 };
 
 export const DEFAULTS = {
@@ -94,7 +110,6 @@ export const DEFAULTS = {
   childWidthMm: 450,
 } as const;
 
-// Door type width presets (mm)
 export const DOOR_WIDTH_PRESETS: Record<DoorType, number> = {
   single: 900,
   'parent-child': 1350,
@@ -102,6 +117,29 @@ export const DOOR_WIDTH_PRESETS: Record<DoorType, number> = {
 };
 
 const UNDERCUT_STRUCTURAL_LIMIT_MM = 25;
+
+// ---------------------------------------------------------------------------
+// Grille X position resolver
+// ---------------------------------------------------------------------------
+function computeGrilleXOffset(
+  align: GrilleAlign,
+  leafWidthMm: number,
+  grilleWidthMm: number,
+  designOffsetMm: number,
+): number {
+  const allowedStart = designOffsetMm;
+  const allowedEnd = leafWidthMm - designOffsetMm;
+  const allowedW = allowedEnd - allowedStart;
+  const clampedGW = Math.min(grilleWidthMm, allowedW);
+
+  switch (align) {
+    case 'center':    return allowedStart + (allowedW - clampedGW) / 2;
+    case 'left':      return allowedStart;
+    case 'right':     return allowedEnd - clampedGW;
+    case 'far-left':  return 0;
+    case 'far-right': return leafWidthMm - clampedGW;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Leaf dimension resolver
@@ -166,18 +204,13 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
     const velocityTooLow = actualVelocityMs < minVelocityMs;
     const velocityTooHigh = actualVelocityMs > maxVelocityMs;
     const undercutOverflowsStructural = ucHeightMm > UNDERCUT_STRUCTURAL_LIMIT_MM;
-    const hasGeometryViolation = undercutOverflowsStructural;
-    const isSafe = !velocityTooLow && !velocityTooHigh && !hasGeometryViolation;
+    const isSafe = !velocityTooLow && !velocityTooHigh && !undercutOverflowsStructural;
 
     const singleLeaf: LeafLayout = {
-      leafWidthMm: doorWidthMm,
-      leafOffsetMm: 0,
-      grilleWidthMm: 0,
-      grilleHeightMm: 0,
-      grilleEffectiveAreaM2: 0,
-      glassSlitYMm: 0,
-      glassSlitHeightMm: 0,
-      glassInterference: false,
+      leafWidthMm: doorWidthMm, leafOffsetMm: 0,
+      grilleWidthMm: 0, grilleHeightMm: 0, grilleEffectiveAreaM2: 0, grilleXOffsetMm: 0,
+      glassSlitYMm: 0, glassSlitHeightMm: 0, glassSlitWidthMm: 0, glassSlitXOffsetMm: 0,
+      glassSlitLinked: false, glassInterference: false,
     };
 
     return {
@@ -189,7 +222,8 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
       maxAllowedWidthMm, maxAllowedHeightMm,
       actualVelocityMs, isSafe, velocityTooLow, velocityTooHigh,
       overflowsWidth: false, overflowsHeight: undercutOverflowsStructural,
-      undercutOverflowsStructural, hasGeometryViolation, hasGlassInterference: false,
+      undercutOverflowsStructural, hasGeometryViolation: undercutOverflowsStructural,
+      hasGlassInterference: false,
       grilleContribRatio: 0, undercutContribRatio: 1,
       remediationHint: buildRemediationHint({
         velocityTooLow, velocityTooHigh, overflowsWidth: false,
@@ -204,7 +238,7 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
   }
 
   // -------------------------------------------------------------------------
-  // LOUVER / PUNCHING — distribute across leaves
+  // LOUVER / PUNCHING
   // -------------------------------------------------------------------------
   const leaves = resolveLeaves(inputs);
   const numLeaves = leaves.length;
@@ -212,39 +246,49 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
 
   const leafLayouts: LeafLayout[] = leaves.map((leaf, i) => {
     const cfg = leafConfigs[Math.min(i, 1) as 0 | 1];
-    const { selectedLouverWidth, louverHeightFixed, louverHeight, glassSlitYMm } = cfg;
+    const { selectedLouverWidth, louverHeightFixed, louverHeight, grilleAlign, glassSlitLinked } = cfg;
 
-    const leafMaxW = Math.max(1, leaf.widthMm - 2 * designOffsetMm);
-
-    // Glass slit constraint: reduce usable grille zone from top
-    const glassConstraintMm = glassSlitYMm > 0
-      ? Math.max(0, glassSlitYMm - designOffsetMm)
-      : 0;
-    const effectiveGrilleZoneH = Math.max(10, maxAllowedHeightMm - glassConstraintMm);
-
-    // Rendered glass slit height (within design zone, from top of zone down to slit bottom)
-    const glassSlitHeightMm = glassSlitYMm > 0
-      ? Math.max(0, glassSlitYMm - designOffsetMm)
-      : 0;
+    const leafAllowedW = Math.max(1, leaf.widthMm - 2 * designOffsetMm);
 
     // Grille width
-    const rawW = selectedLouverWidth > 0 ? Math.min(selectedLouverWidth, leafMaxW) : leafMaxW;
+    const rawW = selectedLouverWidth > 0 ? Math.min(selectedLouverWidth, leafAllowedW) : leafAllowedW;
     const gW = Math.max(10, rawW);
     const gWm = gW / 1000;
 
-    // Needed grille height (before zone clamping)
-    let neededH: number;
-    if (louverHeightFixed && louverHeight > 0) {
-      neededH = louverHeight;
+    let gH: number;
+    let effectiveGlassSlitYMm: number;
+    let glassInterference: boolean;
+
+    if (glassSlitLinked) {
+      // Compute grille height without glass constraint, then snap glass to grille top
+      const neededH = louverHeightFixed && louverHeight > 0
+        ? louverHeight
+        : (physAreaPerLeaf / gWm) * 1000;
+      gH = Math.min(neededH, maxAllowedHeightMm);
+      // Glass bottom Y = door top → grille top position
+      effectiveGlassSlitYMm = doorHeightMm - designOffsetMm - gH;
+      glassInterference = false; // linked mode never interferes by design
     } else {
-      neededH = (physAreaPerLeaf / gWm) * 1000;
+      // Independent glass slit constraint
+      const glassConstraintMm = cfg.glassSlitYMm > 0
+        ? Math.max(0, cfg.glassSlitYMm - designOffsetMm)
+        : 0;
+      const zoneH = Math.max(10, maxAllowedHeightMm - glassConstraintMm);
+      const neededH = louverHeightFixed && louverHeight > 0 ? louverHeight : (physAreaPerLeaf / gWm) * 1000;
+      gH = Math.min(neededH, zoneH);
+      effectiveGlassSlitYMm = cfg.glassSlitYMm;
+      glassInterference = cfg.glassSlitYMm > 0 && neededH > zoneH + 0.01;
     }
 
-    // Glass interference: needed grille height exceeds available zone AND glass is active
-    const glassInterference = glassSlitYMm > 0 && neededH > effectiveGrilleZoneH + 0.01;
-
-    const gH = Math.min(neededH, effectiveGrilleZoneH);
     const gEffM2 = (gW / 1000) * (gH / 1000) * openingRate;
+    const grilleXOffsetMm = computeGrilleXOffset(grilleAlign, leaf.widthMm, gW, designOffsetMm);
+
+    // Glass slit visual sizing
+    const glassSlitHeightMm = effectiveGlassSlitYMm > designOffsetMm
+      ? effectiveGlassSlitYMm - designOffsetMm
+      : 0;
+    const glassSlitWidthMm = glassSlitLinked ? gW : leaf.widthMm * 0.55;
+    const glassSlitXOffsetMm = glassSlitLinked ? grilleXOffsetMm : (leaf.widthMm - glassSlitWidthMm) / 2;
 
     return {
       leafWidthMm: leaf.widthMm,
@@ -252,8 +296,12 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
       grilleWidthMm: gW,
       grilleHeightMm: gH,
       grilleEffectiveAreaM2: gEffM2,
-      glassSlitYMm,
+      grilleXOffsetMm,
+      glassSlitYMm: effectiveGlassSlitYMm,
       glassSlitHeightMm,
+      glassSlitWidthMm,
+      glassSlitXOffsetMm,
+      glassSlitLinked,
       glassInterference,
     };
   });
@@ -262,34 +310,27 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
   const hasGlassInterference = leafLayouts.some(l => l.glassInterference);
   const primaryLeaf = leafLayouts[0];
 
-  // Undercut compensation
   const aShortageM2 = Math.max(0, effectiveAreaM2 - totalGrilleEffM2);
   const doorWidthM = doorWidthMm / 1000;
   const undercutHeightMm = aShortageM2 > 0 ? (aShortageM2 / doorWidthM) * 1000 : 0;
-  const undercutWidthMm = doorWidthMm;
 
   const totalEffM2 = totalGrilleEffM2 + (undercutHeightMm / 1000) * doorWidthM;
   const actualVelocityMs = airflowM3s / Math.max(totalEffM2, 1e-9);
 
   const velocityTooLow = actualVelocityMs < minVelocityMs;
   const velocityTooHigh = actualVelocityMs > maxVelocityMs;
-
   const overflowsWidth = primaryLeaf.grilleWidthMm > (Math.max(1, primaryLeaf.leafWidthMm - 2 * designOffsetMm)) + 0.01;
 
   const cfg0 = leafConfigs[0];
-  const neededHforPrimary = cfg0.louverHeightFixed
-    ? cfg0.louverHeight
+  const neededHforPrimary = cfg0.louverHeightFixed ? cfg0.louverHeight
     : (physAreaPerLeaf / (primaryLeaf.grilleWidthMm / 1000)) * 1000;
-
-  const primaryGlassConstraint = cfg0.glassSlitYMm > 0
-    ? Math.max(0, cfg0.glassSlitYMm - designOffsetMm)
-    : 0;
-  const primaryZoneH = Math.max(10, maxAllowedHeightMm - primaryGlassConstraint);
+  const primaryZoneH = cfg0.glassSlitLinked
+    ? maxAllowedHeightMm
+    : Math.max(10, maxAllowedHeightMm - Math.max(0, (cfg0.glassSlitYMm || 0) - designOffsetMm));
   const grilleOverflowsHeight = neededHforPrimary > primaryZoneH + 0.01;
-
   const undercutOverflowsStructural = undercutHeightMm > UNDERCUT_STRUCTURAL_LIMIT_MM;
   const overflowsHeight = grilleOverflowsHeight && undercutOverflowsStructural;
-  const hasGeometryViolation = overflowsWidth || (grilleOverflowsHeight && undercutOverflowsStructural) || hasGlassInterference;
+  const hasGeometryViolation = overflowsWidth || overflowsHeight || hasGlassInterference;
   const isSafe = !velocityTooLow && !velocityTooHigh && !hasGeometryViolation;
 
   const grilleContribRatio = totalEffM2 > 0 ? totalGrilleEffM2 / totalEffM2 : 0;
@@ -301,13 +342,13 @@ export function calculateVentilation(inputs: VentilationInputs): VentilationResu
     grilleWidthMm: primaryLeaf.grilleWidthMm,
     grilleHeightMm: primaryLeaf.grilleHeightMm,
     grilleEffectiveAreaM2: totalGrilleEffM2,
-    undercutHeightMm, undercutWidthMm,
+    undercutHeightMm, undercutWidthMm: doorWidthMm,
     requiredOpeningWidthMm: primaryLeaf.grilleWidthMm,
     requiredOpeningHeightMm: primaryLeaf.grilleHeightMm,
     maxAllowedWidthMm, maxAllowedHeightMm,
     actualVelocityMs, isSafe, velocityTooLow, velocityTooHigh,
-    overflowsWidth, overflowsHeight, undercutOverflowsStructural, hasGeometryViolation,
-    hasGlassInterference,
+    overflowsWidth, overflowsHeight, undercutOverflowsStructural,
+    hasGeometryViolation, hasGlassInterference,
     grilleContribRatio, undercutContribRatio,
     remediationHint: buildRemediationHint({
       velocityTooLow, velocityTooHigh, overflowsWidth,
@@ -350,7 +391,7 @@ function buildRemediationHint(h: HintInputs): string | null {
   if (h.hasGlassInterference) {
     hints.push(
       `【意匠境界エラー（ガラスと干渉）】ガラリの必要高さがスリットガラスゾーンに侵入しています。` +
-      `スリットガラス下端位置を下方に移動させるか、ガラリ固定幅を広げて高さを削減してください。`
+      `スリットガラス下端位置を下方に移動するかガラリ幅を広げてください。`
     );
   }
 
@@ -364,14 +405,12 @@ function buildRemediationHint(h: HintInputs): string | null {
   if (h.grilleOverflowsHeight && !h.undercutOverflowsStructural && h.combinedMode) {
     hints.push(
       `【複合補償モード】ガラリゾーン（${h.maxAllowedHeightMm.toFixed(0)} mm）を超えるため` +
-      `アンダーカット ${h.undercutHeightMm.toFixed(1)} mm で自動補償中。` +
-      `建具H寸法の拡大またはスリットガラス位置の下方移動でゾーンを拡張できます。`
+      `アンダーカット ${h.undercutHeightMm.toFixed(1)} mm で自動補償中。`
     );
   } else if (h.grilleOverflowsHeight && !h.combinedMode) {
     const excess = Math.ceil(h.grilleHeightMm - h.maxAllowedHeightMm);
     hints.push(
-      `【意匠境界エラー】ガラリ高さが意匠ゾーンを ${excess} mm 超過。` +
-      `建具H寸法を ≥${excess} mm 拡大するか固定幅を広げてください。`
+      `【意匠境界エラー】ガラリ高さが意匠ゾーンを ${excess} mm 超過。建具H寸法を拡大してください。`
     );
   }
 
@@ -389,16 +428,14 @@ function buildRemediationHint(h: HintInputs): string | null {
   if (h.velocityTooHigh) {
     const excess = (h.actualVelocityMs - h.maxVelocityMs).toFixed(2);
     hints.push(
-      `【警告】通過風速が速すぎます（${h.actualVelocityMs.toFixed(2)} m/s、上限超過 +${excess} m/s）。` +
-      `ガラリ幅を広げるかアンダーカット高さを併用してください。`
+      `【警告】通過風速が速すぎます（${h.actualVelocityMs.toFixed(2)} m/s、+${excess} m/s）。ガラリ幅を広げてください。`
     );
   }
 
   if (h.velocityTooLow) {
     const deficit = (h.minVelocityMs - h.actualVelocityMs).toFixed(2);
     hints.push(
-      `【警告】通過風速が遅すぎます（${h.actualVelocityMs.toFixed(2)} m/s、下限不足 −${deficit} m/s）。` +
-      `ガラリ固定幅を縮小するか必要風量を増加させてください。`
+      `【警告】通過風速が遅すぎます（${h.actualVelocityMs.toFixed(2)} m/s、−${deficit} m/s）。換気量を確認してください。`
     );
   }
 
